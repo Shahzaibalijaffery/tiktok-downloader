@@ -1,0 +1,458 @@
+/**
+ * Download button styles: video (watch) page and feed page.
+ * Loaded via manifest content_scripts on *://*.tiktok.com/*
+ */
+
+/* ========== Video (watch) page ========== */
+
+/* Video actions bar: 5 columns so Download button fits at start */
+[class*="VideoActions"] {
+  grid-template-columns: repeat(5, 1fr) !important;
+}
+
+/* Wrapper: full width of container */
+#vimeo-downloader-page-button-wrapper {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  overflow: visible !important;
+}
+
+.vimeo-downloader-button-group {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  height: 40px;
+  border-radius: 6px;
+  overflow: visible !important;
+  background: #f8f8f8;
+  border: 1px solid #f8f8f8;
+}
+
+/* Ensure parent containers don't clip the dropdown */
+.css-rrm59m {
+  overflow: visible !important;
+}
+
+.chakra-stack.css-tistzx {
+  overflow: visible !important;
+}
+
+/* Match TikTok action buttons: 40px height above 786px, no border, #f8f8f8; main btn grows to fill */
+.vimeo-downloader-download-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  box-sizing: border-box;
+  background: #f8f8f8;
+  color: #0d0d0d;
+  border: none;
+  border-radius: 0;
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  position: relative;
+}
+
+.vimeo-downloader-download-btn:hover {
+  background: #fff;
+  border-color: #fff;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+  color: #0d0d0d;
+}
+
+.vimeo-downloader-download-btn .download-icon {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  [data-testid="action-bar"] {
+    overflow-x: scroll;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-testid="action-bar"] .chakra-stack {
+    overflow-y: visible !important;
+  }
+
+  .vimeo-downloader-download-btn {
+    padding: 0 10px;
+    min-width: 32px;
+  }
+
+  .vimeo-downloader-download-btn .download-text {
+    display: none;
+  }
+
+  .vimeo-downloader-download-btn .download-icon {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+  }
+}
+
+.vimeo-downloader-dropdown-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0;
+  background: #f8f8f8;
+  color: #0d0d0d;
+  border: none;
+  border-radius: 0;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.vimeo-downloader-dropdown-btn:hover {
+  background: #fff;
+  border-color: #fff;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+  color: #0d0d0d;
+}
+
+.vimeo-downloader-dropdown-btn svg {
+  pointer-events: none;
+}
+
+@media (max-width: 786px) {
+  .vimeo-downloader-button-group {
+    height: 32px;
+  }
+  .vimeo-downloader-download-btn {
+    height: 32px;
+  }
+  .vimeo-downloader-dropdown-btn {
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+  }
+}
+
+.vimeo-downloader-quality-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #f8f8f8;
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 999999 !important;
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  padding: 4px 0;
+  min-width: 140px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+}
+
+@media (max-width: 600px) {
+  .vimeo-downloader-quality-menu {
+    max-width: calc(100vw - 16px) !important;
+  }
+}
+
+.vimeo-downloader-quality-menu.show {
+  display: block !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  visibility: visible !important;
+}
+
+.vimeo-downloader-quality-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #0d0d0d;
+  transition: background-color 0.15s ease;
+  border-bottom: none;
+}
+
+.vimeo-downloader-quality-item:last-child {
+  border-bottom: none;
+}
+
+.vimeo-downloader-quality-item .quality-resolution {
+  flex: 0 0 auto;
+}
+
+.vimeo-downloader-quality-item .quality-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.08);
+  color: #0d0d0d;
+}
+
+.vimeo-downloader-quality-item.selected .quality-tag {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.vimeo-downloader-quality-item:hover {
+  background: #fff;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+}
+
+.vimeo-downloader-quality-item.selected {
+  background: #fff;
+  color: #0d0d0d;
+  font-weight: 600;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+}
+
+.vimeo-downloader-quality-item.selected:hover {
+  background: #fff;
+  box-shadow: 0 0 0.5rem #0d0d0d40;
+}
+
+.vimeo-downloader-download-btn .download-selected-quality {
+  margin-left: 4px;
+  font-weight: 500;
+}
+
+/* Injected video-page button: single cohesive bar (icon + Download + quality pill + chevron) */
+.dm-page-download-wrapper {
+  display: inline-flex;
+  align-items: center;
+}
+
+.dm-page-download-group {
+  width: auto !important;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.dm-page-download-group .vimeo-downloader-download-btn {
+  padding: 0 10px 0 12px;
+  gap: 6px;
+}
+
+.dm-quality-pill {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0d0d0d;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  max-width: 52px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dm-page-download-group .dm-dropdown-container {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+/* ========== Feed page ========== */
+
+.dm-download-feed-wrapper {
+  position: relative !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+}
+
+.dm-download-feed-wrapper.dm-feed-btn-native {
+  background: rgb(245, 245, 245) !important;
+  color: #0D0D0D !important;
+  border: none !important;
+  padding: 0 !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 8px !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-right: 0 !important;
+}
+
+.dm-download-feed-wrapper.dm-feed-btn-native:hover {
+  background: #fff !important;
+  color: #0D0D0D !important;
+}
+
+@media (max-width: 767px) {
+  .dm-download-feed-wrapper.dm-feed-btn-native {
+    margin-right: 8px !important;
+    height: auto !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .dm-download-feed-wrapper.dm-feed-btn-native {
+    margin-right: 0 !important;
+    height: 40px !important;
+  }
+}
+
+.dm-download-feed-wrapper.dm-feed-btn-native .dm-download-feed-btn,
+.dm-download-feed-wrapper.dm-feed-btn-native svg,
+.dm-download-feed-wrapper.dm-feed-btn-native img {
+  height: 24px;
+  object-fit: contain;
+}
+
+/* Feed button inner: no border/background so wrapper shows through */
+.dm-download-feed-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: inherit;
+  display: block;
+}
+
+.dm-download-feed-wrapper .dm-download-feed-btn img,
+.dm-download-feed-wrapper .dm-download-feed-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  pointer-events: none;
+}
+
+/* Feed quality menu: hidden by default; JS toggles .dm-feed-menu-open */
+.dm-download-feed-wrapper .dm-feed-quality-menu {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 160px;
+  padding: 4px 0;
+  list-style: none;
+  z-index: 2147483647;
+  pointer-events: auto !important;
+}
+
+.dm-download-feed-wrapper .dm-feed-quality-menu.dm-feed-menu-open {
+  display: block !important;
+}
+
+/* Shared feed quality menu (also used by video page dropdown) */
+.dm-feed-quality-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 4px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 160px;
+  padding: 4px 0;
+  list-style: none;
+  z-index: 2147483647;
+  pointer-events: auto !important;
+}
+
+.dm-feed-quality-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #0d0d0d;
+}
+
+.dm-feed-quality-item:hover {
+  background: #f0f0f0;
+}
+
+.dm-feed-quality-item.disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.dm-feed-quality-item .quality-resolution {
+  flex: 0 0 auto;
+}
+
+.dm-feed-quality-item .quality-tag {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.08);
+  color: #0d0d0d;
+}
+
+/* Video page: reuse feed dropdown look; position below the trigger */
+.dm-dropdown-container .dm-feed-quality-menu {
+  display: none;
+  top: 100%;
+  bottom: auto;
+  left: 0;
+  right: auto;
+  transform: none;
+  margin-bottom: 0;
+  margin-top: 4px;
+}
+
+
+.dm-feed-quality-item.selected {
+  background: #f0f0f0;
+  font-weight: 600;
+}
+
+.dm-feed-quality-item.selected .quality-tag {
+  background: rgba(0, 0, 0, 0.12);
+}

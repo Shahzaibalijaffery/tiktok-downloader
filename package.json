@@ -1,0 +1,14 @@
+{
+  "name": "tiktok-downloader",
+  "version": "1.0.0",
+  "description": "Chrome extension to download TikTok videos",
+  "scripts": {
+    "build": "node build.js",
+    "bundle": "npm run build && node bundle.js",
+    "prepare-firefox": "npm run build && node -e \"require('fs').copyFileSync('manifest.firefox.json','dist/manifest.json'); console.log('dist/manifest.json replaced with Firefox manifest. Load dist/ in Firefox.');\""
+  },
+  "devDependencies": {
+    "terser": "^5.31.0",
+    "archiver": "^7.0.1"
+  }
+}
