@@ -10,7 +10,11 @@
 
   function getVideoUrl(item) {
     const playAddr = item.video && item.video.PlayAddrStruct;
-    if (!playAddr || !Array.isArray(playAddr.UrlList) || playAddr.UrlList.length === 0)
+    if (
+      !playAddr ||
+      !Array.isArray(playAddr.UrlList) ||
+      playAddr.UrlList.length === 0
+    )
       return null;
     const list = playAddr.UrlList;
     for (let i = 0; i < list.length; i++) {
@@ -45,14 +49,18 @@
   const origFetch = window.fetch;
   window.fetch = function (...args) {
     return origFetch.apply(this, args).then(function (response) {
-      const url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
+      const url =
+        typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
       if (!url || !response.ok) return response;
       const clone = response.clone();
       clone
+
         .json()
         .then(function (data) {
           if (!data) return;
           const list = data.itemList || data.item_list;
+
+          console.log(data, "data", list, "list_list");
           if (Array.isArray(list)) handleItemList(list);
         })
         .catch(function () {});

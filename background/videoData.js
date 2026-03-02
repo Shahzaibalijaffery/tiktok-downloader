@@ -10,7 +10,8 @@ function ensureTabItems(tabId) {
 }
 
 function appendItemList(tabId, newItems) {
-  if (!tabId || tabId < 0 || !Array.isArray(newItems) || newItems.length === 0) return;
+  if (!tabId || tabId < 0 || !Array.isArray(newItems) || newItems.length === 0)
+    return;
   ensureTabItems(tabId);
   const seen = new Set(videoData[tabId].items.map((i) => i.id || i.url));
   for (let i = 0; i < newItems.length; i++) {
@@ -26,6 +27,8 @@ function appendItemList(tabId, newItems) {
       id: it.id || null,
     });
   }
+
+  console.log(newItems, "newItems", videoData);
   while (videoData[tabId].items.length > MAX_ITEMS_PER_TAB) {
     videoData[tabId].items.shift();
   }

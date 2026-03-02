@@ -567,11 +567,18 @@ window.addEventListener("message", (event) => {
         [`downloadStatus_${operationId}`]: status || "Converting...",
       });
     }
-  } else if (t === "TIKTOK_ITEM_LIST" && Array.isArray(event.data?.items) && event.data.items.length > 0) {
-    chrome.runtime.sendMessage({ action: "itemListAppend", items: event.data.items }, () => {
-      if (chrome.runtime.lastError) {
-        // ignore
-      }
-    });
+  } else if (
+    t === "TIKTOK_ITEM_LIST" &&
+    Array.isArray(event.data?.items) &&
+    event.data.items.length > 0
+  ) {
+    chrome.runtime.sendMessage(
+      { action: "itemListAppend", items: event.data.items },
+      () => {
+        if (chrome.runtime.lastError) {
+          // ignore
+        }
+      },
+    );
   }
 });

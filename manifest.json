@@ -63,7 +63,8 @@
         "js/webpage-ffmpeg.js",
         "js/ffmpeg-helper-umd.cjs",
         "js/ffmpeg-helper-umd.js",
-        "content/fetch-video-in-page.js","content/item-list-intercept.js"
+        "content/fetch-video-in-page.js",
+        "content/item-list-intercept.js"
       ],
       "matches": ["*://*.tiktok.com/*"]
     }
