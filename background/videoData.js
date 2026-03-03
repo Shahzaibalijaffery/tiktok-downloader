@@ -28,7 +28,6 @@ function appendItemList(tabId, newItems) {
     });
   }
 
-  console.log(newItems, "newItems", videoData);
   while (videoData[tabId].items.length > MAX_ITEMS_PER_TAB) {
     videoData[tabId].items.shift();
   }

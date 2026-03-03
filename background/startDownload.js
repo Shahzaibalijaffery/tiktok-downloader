@@ -292,7 +292,13 @@ async function handleDownload(
       await new Promise((resolve, reject) => {
         chrome.tabs.sendMessage(
           fetchTabId,
-          { action: "fetchVideoInPageContext", url, filename, downloadId },
+          {
+            action: "fetchVideoInPageContext",
+            url,
+            filename,
+            downloadId,
+            convertToMp3: convertToMp3 === true,
+          },
           (response) => {
             if (chrome.runtime.lastError) {
               reject(

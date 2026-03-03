@@ -60,8 +60,28 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Video URLs are collected only via item_list API interception in the content script (itemListAppend).
 
+// FFmpeg runner tab (extension page): avoid running helper iframe on TikTok (CSP blocks it)
+let ffmpegRunnerTabId = null;
+const ffmpegRunnerReadyQueue = [];
+const ffmpegResponseTimeouts = {};
+const ffmpegPendingVideoData = {};
+const ffmpegPendingChunks = {};
+// Extension messaging does not preserve ArrayBuffer (content↔background, background↔runner). We send binary as number[] and reconstruct ArrayBuffer on receive.
+
 // Listen for messages from content script or popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Runner page signals ready (so we can send runFFmpeg)
+  if (request.type === "runnerReady") {
+    if (sender && sender.tab && sender.tab.id) {
+      ffmpegRunnerTabId = sender.tab.id;
+    }
+    ffmpegRunnerReadyQueue.forEach(function (r) {
+      r();
+    });
+    ffmpegRunnerReadyQueue.length = 0;
+    return false;
+  }
+
   // Handle ping to wake up service worker
   if (request.action === "ping") {
     sendResponse({ success: true });
@@ -113,6 +133,203 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "getDownloadInfo") {
     const info = downloadInfo.get(request.downloadId) || null;
     sendResponse({ info });
+  } else if (request.action === "getFFmpegVideoData") {
+    var opId = request.operationId;
+    var buf = opId != null ? ffmpegPendingVideoData[opId] : undefined;
+    if (opId != null) delete ffmpegPendingVideoData[opId];
+    // ArrayBuffer does not survive sendMessage to runner tab; send as number[] so runner can reconstruct.
+    var payload = buf && buf.byteLength > 0
+      ? Array.from(new Uint8Array(buf))
+      : null;
+    sendResponse({ videoData: payload, format: request.format, filename: request.filename });
+    return false;
+  } else if (request.action === "storeFFmpegVideoDataChunk") {
+    var opId = request.operationId;
+    var chunkIndex = request.chunkIndex;
+    var totalChunks = request.totalChunks;
+    var totalByteLength = request.totalByteLength;
+    var chunk = request.chunk;
+    if (opId == null || totalChunks == null || totalByteLength == null || chunkIndex == null) {
+      sendResponse({ success: false, error: "Missing chunk params" });
+      return false;
+    }
+    // Extension messaging JSON-serializes: ArrayBuffer is lost. Content script sends chunk as number[].
+    var isChunkValid = false;
+    if (Array.isArray(chunk) && chunk.length > 0 && chunk.length <= 50 * 1024 * 1024) {
+      try {
+        var ab = new ArrayBuffer(chunk.length);
+        new Uint8Array(ab).set(chunk);
+        chunk = ab;
+        isChunkValid = true;
+      } catch (_) {}
+    }
+    if (!isChunkValid && chunk && typeof chunk.length === "number" && chunk.length > 0 && chunk.length <= 50 * 1024 * 1024) {
+      try {
+        var ab2 = new ArrayBuffer(chunk.length);
+        var view2 = new Uint8Array(ab2);
+        for (var j = 0; j < chunk.length; j++) view2[j] = chunk[j];
+        chunk = ab2;
+        isChunkValid = true;
+      } catch (_) {}
+    }
+    if (!isChunkValid) {
+      sendResponse({ success: false, error: "Invalid chunk" });
+      return false;
+    }
+    if (chunkIndex === 0) {
+      ffmpegPendingChunks[opId] = { totalChunks: totalChunks, totalByteLength: totalByteLength, chunks: [] };
+    }
+    var pending = ffmpegPendingChunks[opId];
+    if (!pending || chunkIndex !== pending.chunks.length) {
+      sendResponse({ success: false, error: "Chunk order mismatch" });
+      return false;
+    }
+    pending.chunks.push(chunk);
+    var complete = pending.chunks.length === pending.totalChunks;
+    if (complete) {
+      var full = new ArrayBuffer(pending.totalByteLength);
+      var view = new Uint8Array(full);
+      var offset = 0;
+      for (var i = 0; i < pending.chunks.length; i++) {
+        view.set(new Uint8Array(pending.chunks[i]), offset);
+        offset += pending.chunks[i].byteLength;
+      }
+      ffmpegPendingVideoData[opId] = full;
+      delete ffmpegPendingChunks[opId];
+    }
+    sendResponse({ success: true, complete: complete });
+    return false;
+  } else if (request.action === "runFFmpegInExtension") {
+    const operationId = request.operationId;
+    const data = request.data || {};
+    const targetTabId = sender.tab && sender.tab.id;
+    const pendingSendResponse = sendResponse;
+
+    var videoBuffer = data.videoData;
+    if (!videoBuffer && operationId != null) {
+      videoBuffer = ffmpegPendingVideoData[operationId];
+    }
+    var isValidBuffer = videoBuffer instanceof ArrayBuffer && videoBuffer.byteLength > 0;
+    if (!isValidBuffer && videoBuffer && typeof videoBuffer.byteLength === "number" && videoBuffer.buffer instanceof ArrayBuffer) {
+      videoBuffer = videoBuffer.buffer.slice(videoBuffer.byteOffset, videoBuffer.byteOffset + videoBuffer.byteLength);
+      isValidBuffer = videoBuffer.byteLength > 0;
+    }
+    if (!isValidBuffer) {
+      pendingSendResponse({ success: false, error: "No or invalid video data from page. Try storing the video first (Convert to MP3 again)." });
+      return true;
+    }
+    ffmpegPendingVideoData[operationId] = videoBuffer;
+
+    const RUNNER_READY_TIMEOUT_MS = 20000;
+    const RESPONSE_TIMEOUT_MS = 95000;
+
+    function ensureRunnerThenRun() {
+      const waitReady = new Promise(function (resolve) {
+        if (ffmpegRunnerTabId !== null) {
+          chrome.tabs.get(ffmpegRunnerTabId, function (tab) {
+            if (tab && !chrome.runtime.lastError) {
+              resolve();
+              return;
+            }
+            ffmpegRunnerTabId = null;
+            ffmpegRunnerReadyQueue.push(resolve);
+            chrome.tabs.create(
+              { url: chrome.runtime.getURL("ffmpeg-runner.html"), active: false },
+              function (tab) {
+                if (tab && tab.id) ffmpegRunnerTabId = tab.id;
+              },
+            );
+          });
+          return;
+        }
+        ffmpegRunnerReadyQueue.push(resolve);
+        chrome.tabs.create(
+          { url: chrome.runtime.getURL("ffmpeg-runner.html"), active: false },
+          function (tab) {
+            if (tab && tab.id) ffmpegRunnerTabId = tab.id;
+          },
+        );
+      });
+
+      const timeoutPromise = new Promise(function (resolve) {
+        setTimeout(function () {
+          resolve();
+        }, RUNNER_READY_TIMEOUT_MS);
+      });
+
+      Promise.race([waitReady, timeoutPromise]).then(function () {
+        const responseTimeout = setTimeout(function () {
+          ffmpegResponseTimeouts[operationId] = null;
+          if (operationId) delete ffmpegPendingVideoData[operationId];
+          if (typeof pendingSendResponse !== "function") return;
+          pendingSendResponse({
+            success: false,
+            error: "Conversion timed out. Try again or check if the FFmpeg helper loaded.",
+          });
+        }, RESPONSE_TIMEOUT_MS);
+        ffmpegResponseTimeouts[operationId] = responseTimeout;
+
+        chrome.runtime.sendMessage(
+          {
+            action: "runFFmpeg",
+            operationId,
+            targetTabId,
+            data: {
+              format: data.format || "mp3",
+              filename: data.filename,
+            },
+          },
+          function (response) {
+            const tid = ffmpegResponseTimeouts[operationId];
+            if (tid) {
+              clearTimeout(tid);
+              ffmpegResponseTimeouts[operationId] = null;
+            }
+            if (typeof pendingSendResponse !== "function") return;
+            if (response && response.success) {
+              pendingSendResponse({
+                success: true,
+                processedData: response.processedData,
+                filename: response.filename,
+                mimeType: response.mimeType,
+              });
+            } else {
+              pendingSendResponse({
+                success: false,
+                error: (response && response.error) || "Conversion failed",
+              });
+            }
+          },
+        );
+      });
+    }
+
+    ensureRunnerThenRun();
+    return true;
+  } else if (request.type === "ffmpegConversionDone") {
+    const opId = request.operationId;
+    const tid = ffmpegResponseTimeouts[opId];
+    if (tid) {
+      clearTimeout(tid);
+      ffmpegResponseTimeouts[opId] = null;
+    }
+    const tabId = request.targetTabId;
+    if (tabId) {
+      chrome.tabs.sendMessage(
+        tabId,
+        {
+          action: "ffmpegResult",
+          operationId: request.operationId,
+          success: request.success,
+          processedData: request.processedData,
+          filename: request.filename,
+          mimeType: request.mimeType,
+          error: request.error,
+        },
+        function () { if (chrome.runtime.lastError) {} },
+      );
+    }
+    return false;
   } else if (request.action === "download") {
     return handleDownloadAction(
       request,
@@ -200,6 +417,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Clean up old data when tab is closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete videoData[tabId];
+  if (tabId === ffmpegRunnerTabId) ffmpegRunnerTabId = null;
 });
 
 // Clear stored video data for a tab (e.g. on navigation/refresh)

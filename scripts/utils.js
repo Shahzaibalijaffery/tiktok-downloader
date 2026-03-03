@@ -94,7 +94,7 @@ function extractQuality(type, url = "") {
     return null;
   }
 
-  // Try to extract from type first (e.g., "mp4-1080p", "hls-1080p", "hls-720p")
+  // Try to extract from type first (e.g., "mp4-1080p")
   if (type) {
     const match = type.match(/(\d+)p/i);
     if (match) {
@@ -117,61 +117,14 @@ function formatQualityLabel(video) {
   if (!video || !video.type) {
     return "Video";
   }
-
   const quality = extractQuality(video.type, video.url);
-  const isMP4 = video.type.includes("mp4") && !video.type.includes("m3u8");
-  const isHLS = video.type.includes("m3u8") || video.type.includes("hls");
-
-  let qualityLabel = "";
-
-  if (quality != null) {
-    qualityLabel = getQualityDisplayLabel(quality);
-  } else if (isHLS && video.type) {
-    var typeMatch = video.type.match(/hls-(\d+)p?/i);
-    if (typeMatch) {
-      qualityLabel = getQualityDisplayLabel(parseInt(typeMatch[1], 10));
-    } else if (video.url) {
-      if (video.url.includes("4320") || video.url.includes("8k")) {
-        qualityLabel = "4320p";
-      } else if (video.url.includes("2160") || video.url.includes("4k")) {
-        qualityLabel = "2160p";
-      } else if (video.url.includes("1440")) {
-        qualityLabel = "1440p";
-      } else if (video.url.includes("1080") || video.url.includes("hd")) {
-        qualityLabel = "1080p";
-      } else if (video.url.includes("720")) {
-        qualityLabel = "720p";
-      } else if (video.url.includes("480")) {
-        qualityLabel = "480p";
-      } else if (
-        video.url.includes("380") ||
-        video.url.includes("360") ||
-        video.url.includes("288")
-      ) {
-        qualityLabel = "380p";
-      } else if (video.url.includes("240")) {
-        qualityLabel = "240p";
-      } else {
-        qualityLabel = "Unknown Quality";
-      }
-    } else {
-      qualityLabel = "Stream";
-    }
-  } else {
-    if (isHLS) {
-      qualityLabel = "Stream";
-    } else if (isMP4) {
-      qualityLabel = "MP4";
-    } else {
-      qualityLabel = video.type || "Video";
-    }
-  }
-
-  // Add format suffix only for MP4; HLS shows quality only (e.g. 720p, 1080p)
-  if (isMP4) {
-    return `${qualityLabel} (MP4)`;
-  }
-  return qualityLabel;
+  const qualityLabel =
+    quality != null
+      ? getQualityDisplayLabel(quality)
+      : video.type.includes("mp4")
+        ? "MP4"
+        : video.type || "Video";
+  return quality != null ? `${qualityLabel} (MP4)` : qualityLabel;
 }
 
 function fixUrlEncoding(url) {
@@ -236,14 +189,7 @@ function isMP4(type) {
   if (!type || typeof type !== "string") {
     return false;
   }
-  return type.includes("mp4") && !type.includes("m3u8");
-}
-
-function isHLS(type) {
-  if (!type || typeof type !== "string") {
-    return false;
-  }
-  return type.includes("m3u8") || type.includes("hls");
+  return type.includes("mp4");
 }
 
 function validateJsonResponse(response, responseText) {

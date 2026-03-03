@@ -31,7 +31,9 @@ const copyFiles = [
     src: "assets/feed-download-icon.png",
     dest: "assets/feed-download-icon.png",
   },
-  { src: "js/webpage-ffmpeg.js", dest: "js/webpage-ffmpeg.js" },
+  { src: "js/tiktok-ffmpeg.js", dest: "js/tiktok-ffmpeg.js" },
+  { src: "ffmpeg-runner.html", dest: "ffmpeg-runner.html" },
+  { src: "ffmpeg-runner.js", dest: "ffmpeg-runner.js" },
 ];
 
 async function minifyFile(inputPath, outputPath) {

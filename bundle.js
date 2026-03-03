@@ -12,7 +12,9 @@ const filesToInclude = [
   "background/startDownload.js",
   "js/ffmpeg-helper-umd.cjs",
   "js/ffmpeg-helper-umd.js",
-  "js/webpage-ffmpeg.js",
+  "js/tiktok-ffmpeg.js",
+  "ffmpeg-runner.html",
+  "ffmpeg-runner.js",
   "content/utils.js",
   "content/downloadNotifications.js",
   "content/downloadButton.js",
@@ -39,8 +41,8 @@ const filesToInclude = [
 function createBundle(target = "chrome") {
   const isFirefox = target === "firefox";
   const zipName = isFirefox
-    ? "dailymotion-downloader-firefox.zip"
-    : "dailymotion-downloader-chrome.zip";
+    ? "tiktok-downloader-firefox.zip"
+    : "tiktok-downloader-chrome.zip";
   const outputPath = path.join(__dirname, "dist", zipName);
   const output = fs.createWriteStream(outputPath);
   const archive = archiver("zip", {
@@ -110,7 +112,7 @@ async function run() {
   await createBundle("chrome");
   await createBundle("firefox");
   console.log(
-    "\n✅ Done. Load dailymotion-downloader-firefox.zip in Firefox (Load Temporary Add-on → select zip).",
+    "\n✅ Done. Load tiktok-downloader-firefox.zip in Firefox (Load Temporary Add-on → select zip).",
   );
 }
 

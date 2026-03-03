@@ -69,7 +69,7 @@
     {
       "resources": [
         "assets/feed-download-icon.png",
-        "js/webpage-ffmpeg.js",
+        "js/tiktok-ffmpeg.js",
         "js/ffmpeg-helper-umd.js",
         "content/fetch-video-in-page.js"
       ],
