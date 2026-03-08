@@ -1,12 +1,9 @@
 const MAX_CONCURRENT_DOWNLOADS = 3;
-const MAX_SEGMENTS_FOR_CONCURRENT = 500;
 
 const DOWNLOAD_STORAGE_KEYS = (id) => [
   `downloadCancelled_${id}`,
   `downloadStatus_${id}`,
   `downloadProgress_${id}`,
-  `downloadSegments_${id}`,
-  `blobReady_${id}`,
 ];
 
 function notifyTab(tabId, message) {
@@ -15,7 +12,7 @@ function notifyTab(tabId, message) {
   };
   if (tabId) send(tabId);
   else
-    chrome.tabs.query({ url: "*://*.tiktok.com/*" }, (tabs) =>
+    chrome.tabs.query({ url: "https://www.tiktok.com/*" }, (tabs) =>
       send(tabs?.[0]?.id),
     );
 }
@@ -208,7 +205,7 @@ function handleDownloadAction(
           chrome.tabs.get(completedInfo.tabId, (tab) => {
             if (
               !chrome.runtime.lastError &&
-              tab?.url?.includes("tiktok.com") &&
+              tab?.url?.startsWith("https://www.tiktok.com") &&
               (!completedInfo.videoId ||
                 extractVideoId(tab.url) === completedInfo.videoId)
             ) {
@@ -277,7 +274,7 @@ async function handleDownload(
         const tabs = await chrome.tabs.query({
           active: true,
           currentWindow: true,
-          url: "*://*.tiktok.com/*",
+          url: "https://www.tiktok.com/*",
         });
         fetchTabId = tabs[0]?.id ?? null;
       }

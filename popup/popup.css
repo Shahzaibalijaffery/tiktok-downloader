@@ -467,23 +467,6 @@ button:active {
   line-height: 1.6;
 }
 
-.refresh-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  margin-top: 20px;
-  width: 100%;
-  max-width: 200px;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 500;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.refresh-btn:hover {
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
-  transform: translateY(-1px);
-}
-
 .notification-area {
   position: sticky;
   top: 0;

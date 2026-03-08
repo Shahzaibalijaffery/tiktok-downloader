@@ -13,52 +13,22 @@
  */
 function safeSendMessage(message, callback) {
   if (typeof chrome === 'undefined' || !chrome.runtime) {
-    console.warn('Chrome runtime API not available');
     if (callback) callback(null);
     return;
   }
-  
-  // Check if extension context is still valid
   if (!isExtensionContextValid()) {
-    console.warn('Extension context invalidated, cannot send message');
     if (callback) callback(null);
     return;
   }
-  
   try {
-    if (message.action === 'cancelDownload') {
-      console.log('🚫 [MESSAGING] Sending cancelDownload message:', message);
-    }
     chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
-        const errorMessage = chrome.runtime.lastError.message || '';
-        
-        // Don't log connection errors as warnings - they're often expected
-        // (e.g., when service worker is sleeping or extension is reloading)
-        const isConnectionError = errorMessage.includes('Could not establish connection') ||
-                                 errorMessage.includes('Receiving end does not exist') ||
-                                 errorMessage.includes('Extension context invalidated');
-        
-        if (message.action === 'cancelDownload') {
-          console.error('🚫 [MESSAGING] Error sending cancelDownload:', errorMessage);
-        } else if (!isConnectionError) {
-          console.warn('Message send error:', errorMessage);
-        }
-        
         if (callback) callback(null);
         return;
       }
-      
-      if (message.action === 'cancelDownload') {
-        console.log('🚫 [MESSAGING] cancelDownload response received:', response);
-      }
-      
-      if (callback) {
-        callback(response);
-      }
+      if (callback) callback(response);
     });
   } catch (e) {
-    console.error('Error in safeSendMessage:', e);
     if (callback) callback(null);
   }
 }

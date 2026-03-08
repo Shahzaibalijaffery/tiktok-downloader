@@ -59,22 +59,9 @@ async function cancelDownload(
     // Keep cancellation flag/status for 2 seconds so download process can detect it, then remove everything
     setTimeout(() => {
       chrome.storage.local.remove(
-        [
-          `downloadStatus_${downloadId}`,
-          `downloadCancelled_${downloadId}`,
-          `blobReady_${downloadId}`, // Also clean up blob ready flag if it exists
-        ],
+        [`downloadStatus_${downloadId}`, `downloadCancelled_${downloadId}`],
         () => {
           if (chrome.runtime.lastError) {
-            console.error(
-              "Error cleaning up cancelled download storage:",
-              chrome.runtime.lastError,
-            );
-          } else {
-            console.log(
-              "Cleaned up all cancelled download storage:",
-              downloadId,
-            );
           }
         },
       );
@@ -91,7 +78,7 @@ async function cancelDownload(
         () => {},
       );
     } else {
-      chrome.tabs.query({ url: "*://*.tiktok.com/*" }, (tabs) => {
+      chrome.tabs.query({ url: "https://www.tiktok.com/*" }, (tabs) => {
         if (tabs && tabs.length > 0) {
           chrome.tabs.sendMessage(
             tabs[0].id,
@@ -105,7 +92,6 @@ async function cancelDownload(
       });
     }
   } catch (error) {
-    console.error("Error in cancelDownload:", error);
     throw error;
   }
 }

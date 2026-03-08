@@ -23,7 +23,6 @@ function isExtensionContextValid() {
  */
 function safeStorageGet(keys, callback) {
   if (!isExtensionContextValid()) {
-    console.warn('Extension context invalidated, cannot access storage');
     if (callback) callback({});
     return;
   }
@@ -33,7 +32,6 @@ function safeStorageGet(keys, callback) {
       if (chrome.runtime.lastError) {
         const errorMessage = chrome.runtime.lastError.message || '';
         if (errorMessage.includes('Extension context invalidated') || errorMessage.includes('message port closed')) {
-          console.warn('Extension context invalidated during storage access');
           if (callback) callback({});
           return;
         }
@@ -41,7 +39,6 @@ function safeStorageGet(keys, callback) {
       if (callback) callback(result);
     });
   } catch (error) {
-    console.warn('Error accessing storage:', error);
     if (callback) callback({});
   }
 }

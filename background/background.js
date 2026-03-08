@@ -20,10 +20,6 @@ function injectContentScriptIntoTab(tabId) {
       files: CONTENT_SCRIPT_FILES,
     })
     .then(() => {
-      console.log(
-        "[TikTok Downloader] Injected content script into tab",
-        tabId,
-      );
       // Content script will try at ~4.5s; if DOM wasn't ready, request again at 6s and 12s
       INJECT_BUTTON_RETRY_DELAYS_MS.forEach((delayMs) => {
         setTimeout(() => {
@@ -39,19 +35,13 @@ function injectContentScriptIntoTab(tabId) {
         }, delayMs);
       });
     })
-    .catch((err) => {
-      console.warn(
-        "[TikTok Downloader] Failed to inject content script into tab",
-        tabId,
-        err,
-      );
-    });
+    .catch(() => {});
 }
 
 // On install/update: inject content scripts into all existing TikTok tabs so the download button appears without refresh
 chrome.runtime.onInstalled.addListener((details) => {
   if (!chrome.scripting || !chrome.scripting.executeScript) return;
-  chrome.tabs.query({ url: "*://*.tiktok.com/*" }, (tabs) => {
+  chrome.tabs.query({ url: "https://www.tiktok.com/*" }, (tabs) => {
     tabs.forEach((tab) => {
       if (tab.id) injectContentScriptIntoTab(tab.id);
     });
@@ -62,10 +52,14 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // FFmpeg runner tab (extension page): avoid running helper iframe on TikTok (CSP blocks it)
 let ffmpegRunnerTabId = null;
+/** tabId -> visible video ID (from DOM). Popup uses this to show the focused video. */
+var visibleVideoIdByTab = Object.create(null);
 const ffmpegRunnerReadyQueue = [];
 const ffmpegResponseTimeouts = {};
 const ffmpegPendingVideoData = {};
 const ffmpegPendingChunks = {};
+/** chrome.downloads id -> { ourDownloadId, blobUrl } so we set progress 100 when file is written. */
+const blobDownloadByChromeId = new Map();
 // Extension messaging does not preserve ArrayBuffer (content↔background, background↔runner). We send binary as number[] and reconstruct ArrayBuffer on receive.
 
 // Listen for messages from content script or popup
@@ -88,6 +82,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === "setVisibleVideoId") {
+    const tabId = sender.tab && sender.tab.id;
+    if (tabId != null && request.videoId != null && String(request.videoId).trim() !== "") {
+      visibleVideoIdByTab[tabId] = String(request.videoId);
+    }
+    return false;
+  }
+
   if (request.action === "getVideoData") {
     let tabId = request.tabId;
     if (!tabId && sender && sender.tab && sender.tab.id) {
@@ -95,9 +97,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     (async () => {
-      const raw = videoData[tabId] || { items: [] };
-      const items = Array.isArray(raw.items) ? raw.items : [];
-      const urls = items.map((it) => ({
+      let raw = videoData[tabId] || { items: [] };
+      let items = Array.isArray(raw.items) ? raw.items : [];
+      if (items.length === 0 && tabId != null) {
+        try {
+          const key = "videoData_" + tabId;
+          const stored = await new Promise((resolve) =>
+            chrome.storage.local.get(key, (o) => resolve(o[key])),
+          );
+          if (
+            stored &&
+            Array.isArray(stored.items) &&
+            stored.items.length > 0
+          ) {
+            items = stored.items;
+          }
+        } catch (_) {}
+      }
+      const requestedVideoId = request.videoId != null ? String(request.videoId) : undefined;
+      const visibleVideoId = tabId != null ? visibleVideoIdByTab[tabId] : undefined;
+      const videoIdToUse = requestedVideoId || visibleVideoId;
+      let singleItem = null;
+      if (videoIdToUse) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i] && String(items[i].id) === videoIdToUse) {
+            singleItem = items[i];
+            break;
+          }
+        }
+      }
+      const itemsToUse = singleItem ? [singleItem] : items;
+      const validItems = itemsToUse.filter((it) => it && it.url);
+      const urls = validItems.map((it) => ({
         url: it.url,
         type: "mp4",
         timestamp: Date.now(),
@@ -106,12 +137,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         videoId: it.id || null,
         fileSize: null,
       }));
-      const last = items[items.length - 1] || null;
+      const last = validItems[validItems.length - 1] || null;
+      const videoIds = {};
+      for (var i = 0; i < validItems.length; i++) {
+        var it = validItems[i];
+        if (it && it.id != null)
+          videoIds[String(it.id)] = { title: it.title || "" };
+      }
       const data = {
         urls,
         activeUrl: last ? last.url : null,
         videoTitle: last ? last.title : null,
-        videoIds: {},
+        videoIds: videoIds,
       };
 
       if (tabId) {
@@ -121,13 +158,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ videoData: data });
     })();
     return true;
-  } else if (request.action === "itemListAppend") {
+  }
+
+  if (request.action === "getStoredVideoIds") {
+    let tabId = request.tabId;
+    if (tabId == null && sender && sender.tab && sender.tab.id) {
+      tabId = sender.tab.id;
+    }
+    (async () => {
+      let items = [];
+      const raw = videoData[tabId];
+      if (raw && Array.isArray(raw.items)) {
+        items = raw.items;
+      }
+      if (items.length === 0 && tabId != null) {
+        try {
+          const key = "videoData_" + tabId;
+          const stored = await new Promise((resolve) =>
+            chrome.storage.local.get(key, (o) => resolve(o[key])),
+          );
+          if (stored && Array.isArray(stored.items)) {
+            items = stored.items;
+          }
+        } catch (_) {}
+      }
+      const videoIds = items
+        .filter((it) => it && it.id != null)
+        .map((it) => String(it.id));
+      sendResponse({ videoIds });
+    })();
+    return true;
+  }
+
+  if (request.action === "itemListAppend") {
     const tabId = sender.tab && sender.tab.id;
     if (!tabId || !Array.isArray(request.items) || request.items.length === 0) {
       sendResponse({ success: false });
       return false;
     }
     appendItemList(tabId, request.items);
+    persistVideoDataForTab(tabId);
     sendResponse({ success: true });
     return false;
   } else if (request.action === "getDownloadInfo") {
@@ -138,10 +208,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     var buf = opId != null ? ffmpegPendingVideoData[opId] : undefined;
     if (opId != null) delete ffmpegPendingVideoData[opId];
     // ArrayBuffer does not survive sendMessage to runner tab; send as number[] so runner can reconstruct.
-    var payload = buf && buf.byteLength > 0
-      ? Array.from(new Uint8Array(buf))
-      : null;
-    sendResponse({ videoData: payload, format: request.format, filename: request.filename });
+    var payload =
+      buf && buf.byteLength > 0 ? Array.from(new Uint8Array(buf)) : null;
+    sendResponse({
+      videoData: payload,
+      format: request.format,
+      filename: request.filename,
+    });
     return false;
   } else if (request.action === "storeFFmpegVideoDataChunk") {
     var opId = request.operationId;
@@ -149,13 +222,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     var totalChunks = request.totalChunks;
     var totalByteLength = request.totalByteLength;
     var chunk = request.chunk;
-    if (opId == null || totalChunks == null || totalByteLength == null || chunkIndex == null) {
+    if (
+      opId == null ||
+      totalChunks == null ||
+      totalByteLength == null ||
+      chunkIndex == null
+    ) {
       sendResponse({ success: false, error: "Missing chunk params" });
       return false;
     }
     // Extension messaging JSON-serializes: ArrayBuffer is lost. Content script sends chunk as number[].
     var isChunkValid = false;
-    if (Array.isArray(chunk) && chunk.length > 0 && chunk.length <= 50 * 1024 * 1024) {
+    if (
+      Array.isArray(chunk) &&
+      chunk.length > 0 &&
+      chunk.length <= 50 * 1024 * 1024
+    ) {
       try {
         var ab = new ArrayBuffer(chunk.length);
         new Uint8Array(ab).set(chunk);
@@ -163,7 +245,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         isChunkValid = true;
       } catch (_) {}
     }
-    if (!isChunkValid && chunk && typeof chunk.length === "number" && chunk.length > 0 && chunk.length <= 50 * 1024 * 1024) {
+    if (
+      !isChunkValid &&
+      chunk &&
+      typeof chunk.length === "number" &&
+      chunk.length > 0 &&
+      chunk.length <= 50 * 1024 * 1024
+    ) {
       try {
         var ab2 = new ArrayBuffer(chunk.length);
         var view2 = new Uint8Array(ab2);
@@ -177,7 +265,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return false;
     }
     if (chunkIndex === 0) {
-      ffmpegPendingChunks[opId] = { totalChunks: totalChunks, totalByteLength: totalByteLength, chunks: [] };
+      ffmpegPendingChunks[opId] = {
+        totalChunks: totalChunks,
+        totalByteLength: totalByteLength,
+        chunks: [],
+      };
     }
     var pending = ffmpegPendingChunks[opId];
     if (!pending || chunkIndex !== pending.chunks.length) {
@@ -209,13 +301,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!videoBuffer && operationId != null) {
       videoBuffer = ffmpegPendingVideoData[operationId];
     }
-    var isValidBuffer = videoBuffer instanceof ArrayBuffer && videoBuffer.byteLength > 0;
-    if (!isValidBuffer && videoBuffer && typeof videoBuffer.byteLength === "number" && videoBuffer.buffer instanceof ArrayBuffer) {
-      videoBuffer = videoBuffer.buffer.slice(videoBuffer.byteOffset, videoBuffer.byteOffset + videoBuffer.byteLength);
+    var isValidBuffer =
+      videoBuffer instanceof ArrayBuffer && videoBuffer.byteLength > 0;
+    if (
+      !isValidBuffer &&
+      videoBuffer &&
+      typeof videoBuffer.byteLength === "number" &&
+      videoBuffer.buffer instanceof ArrayBuffer
+    ) {
+      videoBuffer = videoBuffer.buffer.slice(
+        videoBuffer.byteOffset,
+        videoBuffer.byteOffset + videoBuffer.byteLength,
+      );
       isValidBuffer = videoBuffer.byteLength > 0;
     }
     if (!isValidBuffer) {
-      pendingSendResponse({ success: false, error: "No or invalid video data from page. Try storing the video first (Convert to MP3 again)." });
+      pendingSendResponse({
+        success: false,
+        error:
+          "No or invalid video data from page. Try storing the video first (Convert to MP3 again).",
+      });
       return true;
     }
     ffmpegPendingVideoData[operationId] = videoBuffer;
@@ -234,7 +339,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             ffmpegRunnerTabId = null;
             ffmpegRunnerReadyQueue.push(resolve);
             chrome.tabs.create(
-              { url: chrome.runtime.getURL("ffmpeg-runner.html"), active: false },
+              {
+                url: chrome.runtime.getURL("ffmpeg-runner.html"),
+                active: false,
+              },
               function (tab) {
                 if (tab && tab.id) ffmpegRunnerTabId = tab.id;
               },
@@ -264,7 +372,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           if (typeof pendingSendResponse !== "function") return;
           pendingSendResponse({
             success: false,
-            error: "Conversion timed out. Try again or check if the FFmpeg helper loaded.",
+            error:
+              "Conversion timed out. Try again or check if the FFmpeg helper loaded.",
           });
         }, RESPONSE_TIMEOUT_MS);
         ffmpegResponseTimeouts[operationId] = responseTimeout;
@@ -326,7 +435,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           mimeType: request.mimeType,
           error: request.error,
         },
-        function () { if (chrome.runtime.lastError) {} },
+        function () {
+          if (chrome.runtime.lastError) {
+          }
+        },
       );
     }
     return false;
@@ -342,7 +454,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       activeChromeDownloads,
     );
   } else if (request.action === "downloadFile") {
-    // TikTok main-world fetch: content script sends raw data (ArrayBuffer or TypedArray); background creates blob and downloads
     const filename = request.filename || "download";
     const data = request.data;
     const isArrayBuffer = data instanceof ArrayBuffer;
@@ -356,24 +467,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     const blob = new Blob([data], { type: request.mimeType || "video/mp4" });
     const url = URL.createObjectURL(blob);
-    chrome.downloads.download(
-      {
-        url,
-        filename,
-        saveAs: true,
-      },
-      (downloadId) => {
+    const ourDownloadId = request.downloadId;
+    chrome.downloads.download({ url, filename, saveAs: true }, (chromeId) => {
+      if (chrome.runtime.lastError) {
         URL.revokeObjectURL(url);
-        if (chrome.runtime.lastError) {
-          sendResponse({
-            success: false,
-            error: chrome.runtime.lastError.message,
-          });
-        } else {
-          sendResponse({ success: true, downloadId });
-        }
-      },
-    );
+        sendResponse({
+          success: false,
+          error: chrome.runtime.lastError.message,
+        });
+        return;
+      }
+      if (ourDownloadId != null) {
+        blobDownloadByChromeId.set(chromeId, {
+          ourDownloadId,
+          blobUrl: url,
+        });
+      } else {
+        URL.revokeObjectURL(url);
+      }
+      sendResponse({ success: true, downloadId: chromeId });
+    });
     return true;
   } else if (request.action === "cancelDownload") {
     const downloadId = request.downloadId;
@@ -414,25 +527,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-// Clean up old data when tab is closed
-chrome.tabs.onRemoved.addListener((tabId) => {
-  delete videoData[tabId];
-  if (tabId === ffmpegRunnerTabId) ffmpegRunnerTabId = null;
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state && delta.state.current === "complete") {
+    const info = blobDownloadByChromeId.get(delta.id);
+    if (!info) return;
+    blobDownloadByChromeId.delete(delta.id);
+    try {
+      URL.revokeObjectURL(info.blobUrl);
+    } catch (e) {}
+    chrome.storage.local.set({
+      [`downloadProgress_${info.ourDownloadId}`]: 100,
+      [`downloadStatus_${info.ourDownloadId}`]: "Complete",
+    });
+  }
 });
 
-// Clear stored video data for a tab (e.g. on navigation/refresh)
-function clearTabVideoData(tabId) {
-  if (!videoData[tabId]) return;
-  videoData[tabId].items = [];
+const VIDEO_DATA_CACHE_MAX_ITEMS = 100;
+
+function persistVideoDataForTab(tabId) {
+  const raw = videoData[tabId];
+  if (!raw || !Array.isArray(raw.items) || raw.items.length === 0) return;
+  const items = raw.items.slice(-VIDEO_DATA_CACHE_MAX_ITEMS);
+  const key = "videoData_" + tabId;
+  chrome.storage.local.set(
+    { [key]: { items, updatedAt: Date.now() } },
+    function () {
+      if (chrome.runtime.lastError) {
+      }
+    },
+  );
 }
 
-// Clear stored items only on full page load (navigation/refresh), not on SPA URL change
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (!tab.url || !tab.url.includes("tiktok.com")) return;
-  if (changeInfo.status === "loading" && videoData[tabId]) {
-    clearTabVideoData(tabId);
-    updateBadge(tabId);
-  }
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete videoData[tabId];
+  delete visibleVideoIdByTab[tabId];
+  chrome.storage.local.remove("videoData_" + tabId, function () {});
+  if (tabId === ffmpegRunnerTabId) ffmpegRunnerTabId = null;
 });
 
 function updateBadge(tabId) {
@@ -447,7 +577,5 @@ function updateBadge(tabId) {
       tabId: tabId,
     });
     chrome.action.setBadgeBackgroundColor({ color: "#4CAF50" });
-  } catch (e) {
-    console.warn("Failed to set badge:", e);
-  }
+  } catch (e) {}
 }

@@ -24,7 +24,7 @@ function appendItemList(tabId, newItems) {
     videoData[tabId].items.push({
       url: fixUrlEncoding(url),
       title: typeof it.title === "string" ? it.title.trim() : "",
-      id: it.id || null,
+      id: it.id != null ? String(it.id) : null,
     });
   }
 
@@ -44,10 +44,7 @@ function storeVideoUrl(
   fileSize = null,
 ) {
   url = fixUrlEncoding(url);
-  if (!tabId || tabId < 0) {
-    console.warn("Invalid tabId, skipping URL storage:", { tabId, url, type });
-    return;
-  }
+  if (!tabId || tabId < 0) return;
   ensureTabItems(tabId);
   videoData[tabId].items.push({
     url,

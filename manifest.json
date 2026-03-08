@@ -16,7 +16,7 @@
     "tabs"
   ],
   "host_permissions": [
-    "*://*.tiktok.com/*",
+    "https://www.tiktok.com/*",
     "*://v16-webapp-prime.tiktok.com/*",
     "https://helper.addoncrop.com/*"
   ],
@@ -25,7 +25,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.tiktok.com/*"],
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["content/inject-item-list-early.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://www.tiktok.com/*"],
       "css": [
         "content/downloadButton.css",
         "content/downloadNotifications.css"
@@ -35,6 +41,7 @@
         "scripts/storage.js",
         "scripts/messaging.js",
         "content/utils.js",
+        "content/visibleItemObserver.js",
         "content/downloadNotifications.js",
         "content/downloadButton.js",
         "content/content.js"
@@ -59,6 +66,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "assets/images/download.svg",
         "assets/feed-download-icon.png",
         "js/tiktok-ffmpeg.js",
         "js/ffmpeg-helper-umd.cjs",
@@ -66,7 +74,7 @@
         "content/fetch-video-in-page.js",
         "content/item-list-intercept.js"
       ],
-      "matches": ["*://*.tiktok.com/*"]
+      "matches": ["https://www.tiktok.com/*"]
     }
   ]
 }

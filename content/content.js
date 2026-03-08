@@ -2,12 +2,7 @@
 // Modules are loaded via manifest.json before this script
 // This file coordinates initialization and message routing
 
-const DEBUG = false; // Enable for debugging notifications
 const pendingFfmpegDone = {}; // operationId -> { done } for ffmpegResult delivery (survives service worker restart)
-const originalConsoleLog = console.log;
-// Always log restore-related messages for debugging
-const originalConsoleError = console.error;
-// Global debug state (inspect via window.__dmDownloaderDebug)
 const __dmDebugState = {
   loadedAt: Date.now(),
   lastRestore: null,
@@ -17,31 +12,29 @@ const __dmDebugState = {
   lastShowNotificationError: null,
 };
 
-console.log = (...args) => {
-  // Always log restore and download notification messages
-  const message = args[0]?.toString() || "";
-  if (
-    message.includes("restore") ||
-    message.includes("Restoring") ||
-    message.includes("download notification") ||
-    message.includes("DM Download Button") ||
-    message.includes("✅") ||
-    message.includes("❌") ||
-    message.includes("⚠️")
-  ) {
-    originalConsoleLog(...args);
-  } else if (DEBUG) {
-    originalConsoleLog(...args);
-  }
-};
-console.error = (...args) => {
-  originalConsoleError(...args);
-};
+/** Only console in extension: hydration / document API response data */
+function logHydrationAPI(source, dataWeGot, dataWeStore) {
+  if (typeof console === "undefined" || typeof console.log !== "function")
+    return;
+  if (!dataWeStore || (Array.isArray(dataWeStore) && dataWeStore.length === 0))
+    return;
+  var data = Array.isArray(dataWeStore) ? dataWeStore : dataWeStore;
+  console.log(
+    "[TikTok DL Hydration] document API response — source:",
+    source,
+    "| data:",
+    data,
+  );
+}
 
 // Get video URL from item (same structure as item_list API: video.PlayAddrStruct.UrlList)
 function getVideoUrlFromItem(item) {
   const playAddr = item && item.video && item.video.PlayAddrStruct;
-  if (!playAddr || !Array.isArray(playAddr.UrlList) || playAddr.UrlList.length === 0)
+  if (
+    !playAddr ||
+    !Array.isArray(playAddr.UrlList) ||
+    playAddr.UrlList.length === 0
+  )
     return null;
   const list = playAddr.UrlList;
   for (let i = 0; i < list.length; i++) {
@@ -57,53 +50,207 @@ function getVideoUrlFromItem(item) {
   return list[0];
 }
 
-// Append first videos from document (webapp.updated-items in __UNIVERSAL_DATA_FOR_REHYDRATION__).
-// item_list API then adds more as the user scrolls.
-function appendFirstVideosFromDocument() {
-  const scriptEl = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
-  if (!scriptEl || !scriptEl.textContent) return;
-  try {
-    const data = JSON.parse(scriptEl.textContent);
-    const updatedItems = data?.__DEFAULT_SCOPE__?.["webapp.updated-items"];
-    if (!Array.isArray(updatedItems) || updatedItems.length === 0) return;
-    const itemsToAppend = [];
-    for (let i = 0; i < updatedItems.length; i++) {
-      const item = updatedItems[i];
-      if (!item?.video) continue;
-      const url = getVideoUrlFromItem(item);
-      if (!url) continue;
-      itemsToAppend.push({
+function isVideoWatchPage() {
+  const path = (typeof location !== "undefined" && location.pathname) || "";
+  return /^\/@[^/]+\/video\/\d+/.test(path);
+}
+
+function getVideoIdFromPath() {
+  const path = (typeof location !== "undefined" && location.pathname) || "";
+  const m = path.match(/\/video\/(\d+)/);
+  return m ? m[1] : null;
+}
+
+// Recursively find video items (with PlayAddrStruct) in hydration data.
+function deepCollectVideoItems(data, out, seen) {
+  if (!data || seen.has(data)) return;
+  seen.add(data);
+  if (Array.isArray(data)) {
+    for (let i = 0; i < data.length; i++)
+      deepCollectVideoItems(data[i], out, seen);
+    return;
+  }
+  if (typeof data !== "object") return;
+  if (data.video && data.video.PlayAddrStruct) {
+    const url = getVideoUrlFromItem(data);
+    if (url) {
+      out.push({
         url,
-        title: typeof item.desc === "string" ? item.desc.trim() : "",
-        id: item.id || null,
+        title: typeof data.desc === "string" ? data.desc.trim() : "",
+        id: data.id || null,
       });
     }
-    if (itemsToAppend.length > 0 && chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({ action: "itemListAppend", items: itemsToAppend }, function () {
+    return;
+  }
+  for (const k of Object.keys(data)) deepCollectVideoItems(data[k], out, seen);
+}
+
+// Parse __UNIVERSAL_DATA_FOR_REHYDRATION__ on every page: collect from webapp.updated-items, ItemModule, video-detail, ItemList, and deep collect.
+// Fallback: if no element with that id, search all script tags for same payload (TikTok sometimes uses different id or no id).
+function getHydrationScriptText() {
+  var el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+  if (el && el.textContent && el.textContent.trim().length > 0)
+    return el.textContent;
+  var scripts = document.querySelectorAll(
+    'script[id*="REHYDRATION"], script[id*="rehydration"], script[type="application/json"]',
+  );
+  for (var i = 0; i < scripts.length; i++) {
+    var t = scripts[i].textContent;
+    if (
+      t &&
+      t.trim().length > 0 &&
+      (t.indexOf("__DEFAULT_SCOPE__") !== -1 ||
+        t.indexOf("webapp.updated-items") !== -1 ||
+        t.indexOf("ItemModule") !== -1)
+    )
+      return t;
+  }
+  scripts = document.getElementsByTagName("script");
+  for (i = 0; i < scripts.length; i++) {
+    t = scripts[i].textContent;
+    if (
+      t &&
+      t.length > 500 &&
+      (t.indexOf("__DEFAULT_SCOPE__") !== -1 ||
+        t.indexOf('"ItemModule"') !== -1 ||
+        t.indexOf("webapp.updated-items") !== -1)
+    ) {
+      return t;
+    }
+  }
+  return null;
+}
+
+function getItemsFromHydration() {
+  const scriptText = getHydrationScriptText();
+  if (!scriptText) {
+    if (
+      !document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__") &&
+      !_hydrationPollingInterval
+    )
+      startHydrationPolling();
+    return [];
+  }
+  try {
+    const data = JSON.parse(scriptText);
+    const path = (typeof location !== "undefined" && location.pathname) || "";
+    const videoIdFromUrl = getVideoIdFromPath();
+
+    const out = [];
+    const seenIds = new Set();
+
+    function pushItem(item) {
+      if (!item?.video) return;
+      const url = getVideoUrlFromItem(item);
+      if (!url) return;
+      const id = item.id != null ? String(item.id) : videoIdFromUrl || null;
+      if (id && seenIds.has(id)) return;
+      if (id) seenIds.add(id);
+      out.push({
+        url,
+        title: typeof item.desc === "string" ? item.desc.trim() : "",
+        id: id || null,
+      });
+    }
+
+    const scope = data?.__DEFAULT_SCOPE__ || data?.data || data?.result || data;
+
+    // 1) webapp.updated-items (feed-style, any page)
+    const updated = scope?.["webapp.updated-items"];
+    if (Array.isArray(updated)) {
+      for (let i = 0; i < updated.length; i++) pushItem(updated[i]);
+    }
+
+    // 2) ItemModule (video-style, any page)
+    const itemModule = scope?.ItemModule || scope?.itemModule;
+    if (itemModule && typeof itemModule === "object") {
+      if (videoIdFromUrl) {
+        const single =
+          itemModule[videoIdFromUrl] || itemModule[String(videoIdFromUrl)];
+        if (single && single.video) pushItem(single);
+      }
+      Object.keys(itemModule).forEach((k) => pushItem(itemModule[k]));
+    }
+
+    // 3) webapp.video-detail / video-detail-more (watch page)
+    const videoDetail =
+      scope?.["webapp.video-detail"] || scope?.["webapp.video-detail-more"];
+    if (videoDetail?.itemInfo?.itemStruct) {
+      let itemStruct = videoDetail.itemInfo.itemStruct;
+      if (videoDetail.itemInfo.id != null)
+        itemStruct = Object.assign({}, itemStruct, {
+          id: videoDetail.itemInfo.id,
+        });
+      pushItem(itemStruct);
+    }
+
+    // 4) ItemList / item_list and other list keys
+    const listKeys = [
+      "ItemList",
+      "item_list",
+      "recommendList",
+      "videoList",
+      "list",
+      "items",
+      "itemList",
+      "feed",
+    ];
+    for (let k = 0; k < listKeys.length; k++) {
+      const arr = scope?.[listKeys[k]];
+      if (Array.isArray(arr)) {
+        for (let i = 0; i < arr.length; i++) pushItem(arr[i]);
+      }
+    }
+
+    // 4b) Top-level data.data / data.result item lists (alternative API shape)
+    const alt = data?.data || data?.result;
+    if (alt && typeof alt === "object") {
+      for (let k = 0; k < listKeys.length; k++) {
+        const arr = alt[listKeys[k]];
+        if (Array.isArray(arr)) {
+          for (let i = 0; i < arr.length; i++) pushItem(arr[i]);
+        }
+      }
+    }
+
+    // 5) Deep collect if we still have nothing or for extra items (output is already { url, title, id })
+    if (out.length === 0 || videoIdFromUrl) {
+      const deepOut = [];
+      deepCollectVideoItems(data, deepOut, new Set());
+      if (deepOut.length > 0 && videoIdFromUrl && !out.length)
+        deepOut[0].id = deepOut[0].id || videoIdFromUrl;
+      for (const e of deepOut) {
+        const id = e.id != null ? String(e.id) : videoIdFromUrl || null;
+        if (id && seenIds.has(id)) continue;
+        if (id) seenIds.add(id);
+        out.push({ url: e.url, title: e.title || "", id: id || null });
+      }
+    }
+
+    if (out.length > 0)
+      logHydrationAPI("__UNIVERSAL_DATA_FOR_REHYDRATION__", out, out);
+    return out;
+  } catch (e) {
+    return [];
+  }
+}
+
+function appendFirstVideosFromDocument() {
+  const itemsToAppend = getItemsFromHydration();
+  if (itemsToAppend.length === 0) return;
+  if (chrome.runtime?.sendMessage) {
+    chrome.runtime.sendMessage(
+      { action: "itemListAppend", items: itemsToAppend },
+      function () {
         if (chrome.runtime.lastError) {
           // ignore
         }
-      });
-    }
-  } catch (_) {
-    // ignore parse errors
+      },
+    );
   }
 }
 
-// Always log content script load (top frame only)
-try {
-  if (window.self === window.top) {
-    originalConsoleLog("[DM Downloader] content script loaded", {
-      href: window.location.href,
-      readyState: document.readyState,
-      ts: new Date().toISOString(),
-    });
-  }
-} catch (e) {
-  // ignore
-}
-
-// Catch unexpected errors (top frame only)
+// Catch unexpected errors (top frame only) – update debug state only, no console
 try {
   if (window.self === window.top) {
     window.addEventListener("error", (ev) => {
@@ -112,11 +259,6 @@ try {
         ev?.error?.message ||
         ev?.message ||
         "unknown error";
-      originalConsoleError(
-        "[DM Downloader] window.error",
-        ev?.message || ev,
-        ev?.error,
-      );
     });
     window.addEventListener("unhandledrejection", (ev) => {
       __dmDebugState.lastRestoreError =
@@ -124,23 +266,17 @@ try {
         ev?.reason?.message ||
         String(ev?.reason) ||
         "unhandled rejection";
-      originalConsoleError("[DM Downloader] unhandledrejection", ev?.reason);
     });
   }
 } catch (e) {
   // ignore
 }
 
-// Expose debug helpers for you to run in DevTools console
 try {
   if (window.self === window.top) {
     window.__dmDownloaderDebug = {
       state: __dmDebugState,
-      forceRestore: () => {
-        originalConsoleLog(
-          "[DM Downloader] Restore disabled (downloads run in main world; no restore on refresh).",
-        );
-      },
+      forceRestore: () => {},
       dumpStorageKeys: () =>
         new Promise((resolve) => {
           safeStorageGet(null, (items) => {
@@ -151,15 +287,10 @@ try {
               .sort()
               .map((k) => ({ key: k, value: items[k] }));
             __dmDebugState.lastStorageSnapshot = summary;
-            originalConsoleLog(
-              "[DM Downloader] storage snapshot (download* keys):",
-              summary,
-            );
             resolve(summary);
           });
         }),
       testNotification: () => {
-        originalConsoleLog("[DM Downloader] testNotification()");
         try {
           if (typeof showDownloadNotification === "function") {
             showDownloadNotification(
@@ -173,7 +304,6 @@ try {
           }
         } catch (e) {
           __dmDebugState.lastShowNotificationError = e?.message || String(e);
-          originalConsoleError("[DM Downloader] testNotification error", e);
         }
       },
       pingBackground: () =>
@@ -181,47 +311,84 @@ try {
           try {
             chrome.runtime.sendMessage({ action: "ping" }, (resp) => {
               const err = chrome.runtime.lastError?.message;
-              originalConsoleLog("[DM Downloader] pingBackground result:", {
-                resp,
-                err,
-              });
               resolve({ resp, err });
             });
           } catch (e) {
-            originalConsoleError("[DM Downloader] pingBackground exception", e);
             resolve({ resp: null, err: e?.message || String(e) });
           }
         }),
     };
-    originalConsoleLog(
-      "[DM Downloader] Debug helpers ready: window.__dmDownloaderDebug",
-    );
   }
 } catch (e) {
   // ignore
 }
 
 let lastUrl = location.href;
+var hydrationScriptObserver = null;
 
 function runYourScriptAgain() {
-  console.log("[DM Downloader] runScriptAgain: running script again");
-  if (window.self !== window.top) return;
-  if (!isVideoPage()) return;
-  document
-    .querySelectorAll(
-      ".dm-page-download-wrapper, #vimeo-downloader-page-button-wrapper",
-    )
-    .forEach((w) => w.remove());
-  setTimeout(() => {
-    if (!isVideoPage() || !isExtensionContextValid()) return;
-    if (typeof injectDownloadButton === "function") {
-      window.__dmInjectSource = "runScriptAgain";
-      injectDownloadButton();
-    }
-  }, 2500);
+  /* Only feed button is used; no watch-page button to re-inject */
 }
 
-// Inject item_list API interceptor into main world (top frame only) so we capture feed items and append URLs
+/** Run hydration extraction multiple times after navigation/reload so we catch cache/async updates */
+function scheduleHydrationAfterNavigation() {
+  runHydrationAndMaybeInjectButton();
+  [
+    0, 50, 100, 200, 400, 1000, 2500, 5000, 8000, 12000, 15000, 20000, 25000,
+  ].forEach((ms) => setTimeout(runHydrationAndMaybeInjectButton, ms));
+  startHydrationFastPoll();
+  startHydrationPolling();
+}
+
+var _hydrationPollingInterval = null;
+var _hydrationFastPollInterval = null;
+
+/** Fast poll every 100ms for 2s right after load — catch __UNIVERSAL_DATA_FOR_REHYDRATION__ as soon as it’s filled. */
+function startHydrationFastPoll() {
+  if (_hydrationFastPollInterval) return;
+  var count = 0;
+  var max = 20;
+  _hydrationFastPollInterval = setInterval(function () {
+    runHydrationAndMaybeInjectButton();
+    count += 1;
+    if (count >= max) {
+      clearInterval(_hydrationFastPollInterval);
+      _hydrationFastPollInterval = null;
+    }
+  }, 100);
+}
+
+/** Poll for hydration data every 2s for 26s (catches late API when reload/navigate). Only one active at a time. */
+function startHydrationPolling() {
+  if (_hydrationPollingInterval) clearInterval(_hydrationPollingInterval);
+  var count = 0;
+  var max = 13;
+  _hydrationPollingInterval = setInterval(function () {
+    runHydrationAndMaybeInjectButton();
+    count += 1;
+    if (count >= max) {
+      clearInterval(_hydrationPollingInterval);
+      _hydrationPollingInterval = null;
+    }
+  }, 2000);
+}
+
+/** Start observing the hydration script element so when TikTok updates its content we re-extract */
+function observeHydrationScriptContent() {
+  var scriptEl = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+  if (!scriptEl || hydrationScriptObserver) return;
+  hydrationScriptObserver = new MutationObserver(function () {
+    runHydrationAndMaybeInjectButton();
+  });
+  hydrationScriptObserver.observe(scriptEl, {
+    characterData: true,
+    characterDataOldValue: false,
+    childList: true,
+    subtree: true,
+  });
+}
+
+// Inject item_list + hydration API interceptor on all tiktok.com pages. Early inject runs at document_start; this is fallback.
 (function injectItemListInterceptor() {
   if (window.self !== window.top) return;
   const src = chrome.runtime.getURL("content/item-list-intercept.js");
@@ -231,22 +398,24 @@ function runYourScriptAgain() {
   (document.documentElement || document.body).appendChild(script);
 })();
 
-// Run once
 runYourScriptAgain();
-
-// Detect URL changes
 new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
-    console.log("URL changed:", lastUrl);
     runYourScriptAgain();
+    if (hydrationScriptObserver) {
+      hydrationScriptObserver.disconnect();
+      hydrationScriptObserver = null;
+    }
+    scheduleHydrationAfterNavigation();
+    setTimeout(function () {
+      observeHydrationScriptContent();
+    }, 500);
   }
 }).observe(document, { childList: true, subtree: true });
 
 // Listen for messages from background script to handle blob downloads and download notifications
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("Content script received message:", request.action, request);
-
   // So background can detect that content script is loaded (e.g. before injecting into tab)
   if (request.action === "ping") {
     sendResponse({ pong: true });
@@ -257,7 +426,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "ffmpegResult") {
     const pending = pendingFfmpegDone[request.operationId];
     delete pendingFfmpegDone[request.operationId];
-    if (pending && typeof pending.clearTimeout === "function") pending.clearTimeout();
+    if (pending && typeof pending.clearTimeout === "function")
+      pending.clearTimeout();
     if (!pending || typeof pending.done !== "function") return false;
     try {
       if (request.success && request.processedData) {
@@ -287,9 +457,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       } else {
         chrome.storage.local.set({
           [`downloadProgress_${request.operationId}`]: 0,
-          [`downloadStatus_${request.operationId}`]: request.error || "Conversion failed",
+          [`downloadStatus_${request.operationId}`]:
+            request.error || "Conversion failed",
         });
-        pending.done({ success: false, error: request.error || "Conversion failed" });
+        pending.done({
+          success: false,
+          error: request.error || "Conversion failed",
+        });
       }
     } catch (e) {
       pending.done({ success: false, error: (e && e.message) || String(e) });
@@ -306,41 +480,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
-  // Background asks to try injecting the download button again (e.g. after 6s/12s when page was slow)
+  // Background asks to try injecting the download button (we only use feed button; no-op)
   if (request.action === "requestInjectButton") {
-    if (
-      window.self === window.top &&
-      isVideoPage() &&
-      typeof injectDownloadButton === "function"
-    ) {
-      injectDownloadButton();
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  // Popup requested re-extraction (e.g. no data yet after navigate) – re-run hydration and feed injection
+  if (request.action === "triggerVideoExtraction") {
+    if (window.self === window.top) {
+      runHydrationAndMaybeInjectButton();
+      if (typeof window.__dmRunDesktopFeedInjection === "function") {
+        window.__dmRunDesktopFeedInjection();
+      }
     }
     sendResponse({ ok: true });
     return true;
   }
 
-  // Feed: background can send feedVideoFromApi with videoId to inject button (legacy; TikTok uses direct video URL detection)
-  if (request.action === "feedVideoFromApi" && request.videoId) {
-    try {
-      if (typeof injectFeedButtonForVideoId === "function") {
-        injectFeedButtonForVideoId(request.videoId);
-      }
-      sendResponse({ ok: true });
-    } catch (e) {
-      sendResponse({ ok: false, error: e?.message || String(e) });
-    }
-    return true;
-  }
-
   // Handle download start notification
   if (request.action === "downloadStarted") {
-    console.log(
-      "Download started notification received:",
-      request.downloadId,
-      request.filename,
-      "isExisting:",
-      request.isExisting,
-    );
     const downloadId =
       request.downloadId ||
       `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -348,16 +507,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const qualityLabel = request.qualityLabel || "";
 
     try {
-      console.log(
-        "Attempting to show notification for:",
-        downloadId,
-        filename,
-        "quality:",
-        qualityLabel,
-      );
-      console.log("Document body exists:", !!document.body);
-      console.log("Document ready state:", document.readyState);
-
       // If this is an existing download, check current status first
       if (request.isExisting) {
         safeStorageGet(
@@ -403,9 +552,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // New download
         // Ensure body is ready
         if (!document.body) {
-          console.log("Waiting for document.body...");
           setTimeout(() => {
-            console.log("Retrying notification after body ready");
             if (typeof showDownloadNotification === "function") {
               showDownloadNotification(
                 downloadId,
@@ -421,7 +568,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
           }, 100);
         } else {
-          console.log("Body ready, showing notification immediately");
           if (typeof showDownloadNotification === "function") {
             showDownloadNotification(
               downloadId,
@@ -440,8 +586,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       sendResponse({ success: true });
     } catch (error) {
-      console.error("Error showing download notification:", error);
-      console.error("Error stack:", error.stack);
       sendResponse({ success: false, error: error.message });
     }
     return true; // Keep channel open for async response
@@ -449,11 +593,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // Handle download completion notification
   if (request.action === "downloadCompleted") {
-    console.log(
-      "Download completed notification received:",
-      request.downloadId,
-      request.filename,
-    );
     const downloadId = request.downloadId;
     const filename = request.filename || "video.mp4";
 
@@ -497,10 +636,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // Handle download cancellation notification
   if (request.action === "downloadCancelled") {
-    console.log(
-      "Download cancelled notification received:",
-      request.downloadId,
-    );
     const downloadId = request.downloadId;
 
     // Stop polling immediately
@@ -642,7 +777,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           function sendNextChunk(index) {
             if (index >= chunks.length) {
               chrome.runtime.sendMessage(
-                { action: "runFFmpegInExtension", operationId: downloadId, data: { format: "mp3", filename: mp3Filename } },
+                {
+                  action: "runFFmpegInExtension",
+                  operationId: downloadId,
+                  data: { format: "mp3", filename: mp3Filename },
+                },
                 onRunResponse,
               );
               return;
@@ -661,13 +800,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (chrome.runtime.lastError) {
                   delete pendingFfmpegDone[downloadId];
                   if (p && p.clearTimeout) p.clearTimeout();
-                  done({ success: false, error: chrome.runtime.lastError.message || "Failed to send video chunk" });
+                  done({
+                    success: false,
+                    error:
+                      chrome.runtime.lastError.message ||
+                      "Failed to send video chunk",
+                  });
                   return;
                 }
                 if (!storeResp || !storeResp.success) {
                   delete pendingFfmpegDone[downloadId];
                   if (p && p.clearTimeout) p.clearTimeout();
-                  done({ success: false, error: (storeResp && storeResp.error) || "Failed to store chunk" });
+                  done({
+                    success: false,
+                    error:
+                      (storeResp && storeResp.error) || "Failed to store chunk",
+                  });
                   return;
                 }
                 if (storeResp.complete) {
@@ -681,22 +829,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           sendNextChunk(0);
           return;
         }
-        // Direct download as MP4
-        const blob = new Blob([arrayBuffer], { type: "video/mp4" });
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
+        // Direct download as MP4: use background chrome.downloads so progress hits 100% when file is written
         const safeName = /\.mp4$/i.test(filename)
           ? filename
           : (filename.replace(/\.[^.]+$/, "") || filename || "tiktok_video") +
             ".mp4";
-        a.download = safeName;
-        a.style.display = "none";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        done({ success: true });
+        chrome.runtime.sendMessage(
+          {
+            action: "downloadFile",
+            downloadId,
+            filename: safeName,
+            data: arrayBuffer,
+            mimeType: "video/mp4",
+          },
+          (response) => {
+            if (chrome.runtime.lastError || !response?.success) {
+              // Fallback: blob + click (e.g. message too large); set 100 after storage write
+              const blob = new Blob([arrayBuffer], { type: "video/mp4" });
+              const blobUrl = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = blobUrl;
+              a.download = safeName;
+              a.style.display = "none";
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(blobUrl);
+              chrome.storage.local.set(
+                {
+                  [`downloadProgress_${downloadId}`]: 100,
+                  [`downloadStatus_${downloadId}`]: "Complete",
+                },
+                () => done({ success: true }),
+              );
+            } else {
+              done({ success: true });
+            }
+          },
+        );
       } catch (err) {
         done({ success: false, error: (err && err.message) || String(err) });
       }
@@ -787,23 +957,118 @@ window.addEventListener("message", (event) => {
         [`downloadStatus_${operationId}`]: status || "Converting...",
       });
     }
+  } else if (t === "TIKTOK_VIDEO_FETCH_PROGRESS") {
+    const { downloadId, loaded, total } = event.data;
+    if (downloadId == null) return;
+    const pct =
+      total > 0 ? Math.min(99, Math.round((loaded / total) * 100)) : undefined;
+    chrome.storage.local.set({
+      [`downloadProgress_${downloadId}`]: pct !== undefined ? pct : 0,
+      [`downloadStatus_${downloadId}`]: "Downloading...",
+    });
   } else if (
     t === "TIKTOK_ITEM_LIST" &&
     Array.isArray(event.data?.items) &&
     event.data.items.length > 0
   ) {
+    const items = event.data.items;
+    logHydrationAPI("item_list API", items, items);
     chrome.runtime.sendMessage(
-      { action: "itemListAppend", items: event.data.items },
-      () => {
-        if (chrome.runtime.lastError) {
-          // ignore
-        }
-      },
+      { action: "itemListAppend", items: items },
+      function () {},
     );
   }
 });
 
-// Append first videos from document (webapp.updated-items); item_list API adds more on scroll
-if (window.self === window.top && location.hostname === "www.tiktok.com") {
-  setTimeout(appendFirstVideosFromDocument, 150);
+// On video watch pages we only append once per page to avoid repeated itemListAppend and MutationObserver spam.
+var lastHydrationAppendedPath = null;
+var videoPageHydrationObserver = null;
+
+function runHydrationAndMaybeInjectButton() {
+  if (isVideoWatchPage()) {
+    if (lastHydrationAppendedPath === location.pathname) return;
+  }
+  const itemsToAppend = getItemsFromHydration();
+  if (itemsToAppend.length === 0) return;
+  if (chrome.runtime?.sendMessage) {
+    chrome.runtime.sendMessage(
+      { action: "itemListAppend", items: itemsToAppend },
+      function () {
+        if (chrome.runtime.lastError) return;
+        if (isVideoWatchPage() && itemsToAppend.length > 0) {
+          lastHydrationAppendedPath = location.pathname;
+          if (videoPageHydrationObserver) {
+            videoPageHydrationObserver.disconnect();
+            videoPageHydrationObserver = null;
+          }
+        }
+      },
+    );
+  }
+}
+
+if (window.self === window.top) {
+  runHydrationAndMaybeInjectButton();
+  [0, 50, 100, 200, 150, 400, 800, 1200].forEach((ms) =>
+    setTimeout(runHydrationAndMaybeInjectButton, ms),
+  );
+  [2500, 5000, 8000, 12000, 15000, 20000, 25000].forEach((ms) =>
+    setTimeout(runHydrationAndMaybeInjectButton, ms),
+  );
+  startHydrationFastPoll();
+  startHydrationPolling();
+  var hydrationObserver = new MutationObserver(function (mutations) {
+    var el = document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__");
+    if (el) {
+      runHydrationAndMaybeInjectButton();
+      observeHydrationScriptContent();
+      return;
+    }
+    for (var i = 0; i < mutations.length; i++) {
+      var list = mutations[i].removedNodes;
+      if (!list || list.length === 0) continue;
+      for (var j = 0; j < list.length; j++) {
+        var node = list[j];
+        if (!node) continue;
+        if (
+          node.id === "__UNIVERSAL_DATA_FOR_REHYDRATION__" ||
+          (node.querySelector &&
+            node.querySelector("#__UNIVERSAL_DATA_FOR_REHYDRATION__"))
+        ) {
+          if (hydrationScriptObserver) {
+            hydrationScriptObserver.disconnect();
+            hydrationScriptObserver = null;
+          }
+          scheduleHydrationAfterNavigation();
+          setTimeout(observeHydrationScriptContent, 500);
+          return;
+        }
+      }
+    }
+  });
+  hydrationObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+  });
+  if (document.getElementById("__UNIVERSAL_DATA_FOR_REHYDRATION__")) {
+    runHydrationAndMaybeInjectButton();
+    observeHydrationScriptContent();
+  }
+  window.addEventListener("load", function () {
+    runHydrationAndMaybeInjectButton();
+    [100, 300, 600, 1000, 2500].forEach((ms) =>
+      setTimeout(runHydrationAndMaybeInjectButton, ms),
+    );
+    startHydrationFastPoll();
+  });
+  window.addEventListener("pageshow", function (ev) {
+    if (ev.persisted) {
+      scheduleHydrationAfterNavigation();
+      setTimeout(observeHydrationScriptContent, 300);
+    }
+  });
+  window.addEventListener("popstate", function () {
+    scheduleHydrationAfterNavigation();
+    setTimeout(observeHydrationScriptContent, 300);
+  });
 }

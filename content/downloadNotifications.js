@@ -357,10 +357,7 @@ function startDownloadProgressPolling(downloadId, filename) {
   }
 
   // Check if extension context is valid before starting
-  if (!isExtensionContextValid()) {
-    console.warn("Extension context invalidated, cannot start polling");
-    return;
-  }
+  if (!isExtensionContextValid()) return;
 
   // Check immediately
   const checkProgress = () => {
@@ -391,10 +388,7 @@ function startDownloadProgressPolling(downloadId, filename) {
         if (!activeDownloads.has(downloadId)) {
           return;
         }
-        if (!result) {
-          console.warn("No result from storage for download:", downloadId);
-          return;
-        }
+        if (!result) return;
 
         const progress = result[`downloadProgress_${downloadId}`];
         const status = result[`downloadStatus_${downloadId}`];
@@ -445,10 +439,6 @@ function startDownloadProgressPolling(downloadId, filename) {
                       downloadStatus.toLowerCase().includes("failed") ||
                       downloadStatus.toLowerCase().includes("cancelled")
                     ) {
-                      console.log(
-                        "Download completed/failed, stopping polling:",
-                        downloadId,
-                      );
                       stopDownloadProgressPolling(downloadId);
                       return;
                     }
@@ -461,12 +451,6 @@ function startDownloadProgressPolling(downloadId, filename) {
 
                     // Only recreate a few times to prevent loops
                     if (downloadInfo.recreationCount <= 3) {
-                      // Use console.log instead of console.warn - this is often normal (DOM mutations, etc.)
-                      console.log(
-                        "Notification element missing during polling, recreating:",
-                        downloadId,
-                        `(attempt ${downloadInfo.recreationCount}/3)`,
-                      );
                       showDownloadNotification(
                         downloadId,
                         filename,
@@ -474,21 +458,11 @@ function startDownloadProgressPolling(downloadId, filename) {
                         progress || 0,
                       );
                     } else {
-                      // Too many recreations - might be a persistent DOM issue, stop silently
-                      console.log(
-                        "Too many notification recreations, stopping polling:",
-                        downloadId,
-                      );
                       stopDownloadProgressPolling(downloadId);
                     }
                   },
                 );
               } else {
-                // Download doesn't exist, stop polling
-                console.log(
-                  "Download not found in background, stopping polling:",
-                  downloadId,
-                );
                 stopDownloadProgressPolling(downloadId);
               }
             },
@@ -552,11 +526,6 @@ function startDownloadProgressPolling(downloadId, filename) {
           // No progress data - check if download still exists in background
           const downloadInfo = activeDownloads.get(downloadId);
           if (!downloadInfo) {
-            // Download info not found - might be completed/cleaned up, stop polling silently
-            console.log(
-              "Download info not found (likely completed), stopping polling:",
-              downloadId,
-            );
             stopDownloadProgressPolling(downloadId);
             return;
           }
@@ -566,11 +535,6 @@ function startDownloadProgressPolling(downloadId, filename) {
             { action: "getDownloadInfo", downloadId: downloadId },
             (response) => {
               if (!response || !response.info) {
-                // Download doesn't exist in background, stop polling
-                console.log(
-                  "Download not found in background script, stopping polling:",
-                  downloadId,
-                );
                 stopDownloadProgressPolling(downloadId);
                 // Hide notification if it exists
                 const notificationEl = document.getElementById(
@@ -590,11 +554,6 @@ function startDownloadProgressPolling(downloadId, filename) {
               downloadInfo.pollingFailures++;
 
               if (downloadInfo.pollingFailures > 10) {
-                // Too many failures, stop polling but keep notification
-                console.warn(
-                  "Multiple polling failures (no progress data), stopping polling but keeping notification:",
-                  downloadId,
-                );
                 stopDownloadProgressPolling(downloadId);
                 // Update notification to show "Waiting for progress..."
                 updateDownloadNotification(
@@ -603,14 +562,6 @@ function startDownloadProgressPolling(downloadId, filename) {
                   "Waiting for progress update...",
                   undefined,
                 );
-              } else {
-                // Temporary issue, continue polling (only log every 5th attempt to reduce noise)
-                if (downloadInfo.pollingFailures % 5 === 0) {
-                  console.log(
-                    `No progress data yet (attempt ${downloadInfo.pollingFailures}/10) for download:`,
-                    downloadId,
-                  );
-                }
               }
             },
           );

@@ -8,6 +8,18 @@ function isVideoPage(url) {
   return true;
 }
 
+function isVideoWatchPage(url) {
+  let path = "";
+  if (typeof url === "string") {
+    try {
+      path = new URL(url).pathname;
+    } catch (_) {}
+  } else if (typeof location !== "undefined") {
+    path = (location && location.pathname) || "";
+  }
+  return /^\/@[^/]+\/video\/\d+/.test(path);
+}
+
 function cleanVideoTitle(title) {
   if (!title || typeof title !== "string") {
     return null;
@@ -248,26 +260,11 @@ function cleanupIndexedDBBlob(blobId) {
       const db = request.result;
       const tx = db.transaction(["blobs"], "readwrite");
       tx.objectStore("blobs").delete(blobId);
-      tx.oncomplete = () => {
-        db.close();
-        console.log("Cleaned up IndexedDB blob:", blobId);
-      };
-      tx.onerror = () => {
-        console.error("Failed to clean up IndexedDB blob:", tx.error);
-        db.close();
-      };
+      tx.oncomplete = () => { db.close(); };
+      tx.onerror = () => { db.close(); };
     };
-    request.onerror = () => {
-      console.error("Failed to open IndexedDB for cleanup:", request.error);
-    };
-  } catch (error) {
-    console.error("Error cleaning up IndexedDB:", error);
-  }
-}
-
-function isFeedPage(url) {
-  // Logic removed; feed-specific handling is no longer needed.
-  return false;
+    request.onerror = () => {};
+  } catch (error) {}
 }
 
 function sanitizeFilenameForDownload(filename) {
@@ -294,6 +291,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     extractVideoId,
     isVideoPage,
+    isVideoWatchPage,
     cleanVideoTitle,
     extractQuality,
     formatQualityLabel,
@@ -307,7 +305,6 @@ if (typeof module !== "undefined" && module.exports) {
     formatFileSize,
     isFileTooSmall,
     cleanupIndexedDBBlob,
-    isFeedPage,
     sanitizeFilenameForDownload,
   };
 }

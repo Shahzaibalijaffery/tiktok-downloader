@@ -6,21 +6,27 @@ let currentVideoId = null;
 let currentUrl = null;
 let isLoading = false;
 let latestVideoData = null; // last data received from background (used by download button)
-let refreshInterval = null;
 let navigationCheckInterval = null;
 
-// Retry configuration for slow internet
-const RETRY_CONFIG = {
-  MAX_RETRIES: 15, // Increased for slow internet
-  INITIAL_DELAY: 1000, // 1 second
-  MAX_DELAY: 5000, // 5 seconds max delay
-  BACKOFF_MULTIPLIER: 1.3, // Exponential backoff
-  PERIODIC_REFRESH_INTERVAL: 2000, // Check every 2 seconds for lazy loading
-  NAVIGATION_CHECK_INTERVAL: 1000, // Check URL changes every second
-};
+const NAVIGATION_CHECK_INTERVAL_MS = 1000;
 
-let popupRetryCount = 0;
-let popupRetryTimer = null;
+function isSupportedTikTokPage(url) {
+  return url && typeof url === "string" && url.startsWith("https://www.tiktok.com");
+}
+
+function showNoVideosFinalState() {
+  isLoading = false;
+  const container = document.getElementById("videoList");
+  if (container) {
+    container.innerHTML = `
+      <div class="no-videos">
+        <div class="no-videos-icon">📭</div>
+        <h3>No videos detected</h3>
+        <p>Videos from this page will appear here once detected.</p>
+      </div>
+    `;
+  }
+}
 
 // Initialize when popup opens
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -39,17 +45,8 @@ function initializePopup(tab) {
   currentUrl = tab.url;
   currentVideoId = extractVideoId(tab.url);
 
-  console.log("Popup initialized:", {
-    tabId: currentTabId,
-    url: currentUrl,
-    videoId: currentVideoId,
-  });
-
   // Start loading video data
   loadVideoData(true);
-
-  // Set up periodic refresh for lazy loading (videos that load after popup opens)
-  setupPeriodicRefresh();
 
   // Set up navigation detection (detect URL changes while popup is open)
   setupNavigationDetection();
@@ -71,16 +68,7 @@ function initializePopup(tab) {
  */
 function loadVideoData(showLoading = true, forceRefresh = false) {
   // Prevent multiple simultaneous loads
-  if (isLoading && !forceRefresh) {
-    console.log("Already loading, skipping duplicate request");
-    return;
-  }
-
-  // Clear any existing retry timer
-  if (popupRetryTimer) {
-    clearTimeout(popupRetryTimer);
-    popupRetryTimer = null;
-  }
+  if (isLoading && !forceRefresh) return;
 
   // Always query for active tab to get current URL (handles navigation)
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -95,27 +83,23 @@ function loadVideoData(showLoading = true, forceRefresh = false) {
 
     // Check if URL changed (navigation detected)
     if (currentUrl !== newUrl) {
-      console.log("Navigation detected:", {
-        old: currentUrl,
-        new: newUrl,
-        oldVideoId: currentVideoId,
-        newVideoId: newVideoId,
-      });
       currentUrl = newUrl;
       currentVideoId = newVideoId;
       currentTabId = tab.id;
-      // Reset retry count on navigation
-      popupRetryCount = 0;
     } else if (currentTabId !== tab.id) {
       // Tab ID changed (tab was switched)
       currentTabId = tab.id;
       currentUrl = newUrl;
       currentVideoId = newVideoId;
-      popupRetryCount = 0;
+    }
+
+    if (!newUrl.startsWith("https://www.tiktok.com")) {
+      showError("This extension works only on TikTok (tiktok.com).");
+      return;
     }
 
     // Show loading state
-    if (showLoading && popupRetryCount === 0) {
+    if (showLoading) {
       showLoadingState();
     }
 
@@ -137,17 +121,7 @@ function requestVideoDetection(tabId) {
   chrome.tabs.sendMessage(
     tabId,
     { action: "triggerVideoExtraction", reason: "popup-request" },
-    (response) => {
-      if (chrome.runtime.lastError) {
-        // Content script might not be ready yet, that's okay
-        console.log(
-          "Could not request video detection:",
-          chrome.runtime.lastError.message,
-        );
-      } else {
-        console.log("Video detection requested:", response);
-      }
-    },
+    () => {},
   );
 }
 
@@ -176,65 +150,16 @@ function wakeServiceWorkerAndGetData(tabId, expectedVideoId) {
         const videoData = response.videoData || { urls: [] };
         latestVideoData = videoData;
 
-        console.log(videoData, "[popup] videoData");
-
         const hasVideos = videoData.urls && videoData.urls.length > 0;
 
-        // If no videos, retry with exponential backoff
-        if (!hasVideos && popupRetryCount < RETRY_CONFIG.MAX_RETRIES) {
-          handleRetry(expectedVideoId);
+        if (!hasVideos) {
+          showNoVideosFinalState();
           return;
         }
-
-        // Success - reset retry count and display videos
-        popupRetryCount = 0;
         displayVideosWithTitle(videoData, tabId);
       },
     );
   });
-}
-
-/**
- * Handle retry with exponential backoff
- */
-function handleRetry(expectedVideoId) {
-  popupRetryCount++;
-
-  // Calculate delay with exponential backoff
-  const delay = Math.min(
-    RETRY_CONFIG.INITIAL_DELAY *
-      Math.pow(RETRY_CONFIG.BACKOFF_MULTIPLIER, popupRetryCount - 1),
-    RETRY_CONFIG.MAX_DELAY,
-  );
-
-  // Show retry message
-  const container = document.getElementById("videoList");
-  if (container) {
-    container.innerHTML = `
-      <div class="no-videos">
-        <div class="no-videos-icon">⏳</div>
-        <h3>Detecting Videos...</h3>
-        <p>No videos detected yet. Retrying... (${popupRetryCount}/${RETRY_CONFIG.MAX_RETRIES})</p>
-        <p>This may take a moment on slow connections.</p>
-        <p style="font-size: 11px; color: #666; margin-top: 8px;">
-          ${
-            popupRetryCount <= 3
-              ? "⏱️ Waiting for page to load..."
-              : popupRetryCount <= 8
-                ? "🔄 Checking for videos..."
-                : "🌐 Slow connection detected, please wait..."
-          }
-        </p>
-      </div>
-    `;
-  }
-
-  // Schedule retry
-  popupRetryTimer = setTimeout(() => {
-    // Request fresh detection before retry
-    requestVideoDetection(currentTabId);
-    loadVideoData(false, true);
-  }, delay);
 }
 
 /**
@@ -294,17 +219,10 @@ function handleError(errorMsg) {
         <div class="no-videos-icon">⚠️</div>
         <h3>${isConnectionError ? "Service Worker Not Running" : "Connection Error"}</h3>
         <p>${isConnectionError ? "The extension service worker is not running." : `Error: ${errorMsg}`}</p>
-        <p>Please:</p>
-        <ol>
-          <li>Reload the extension (chrome://extensions → Reload)</li>
-          <li>Refresh this TikTok page</li>
-          <li>Click the refresh button below</li>
-        </ol>
-        <button class="refresh-btn" onclick="window.loadVideoData(true, true)">🔄 Refresh</button>
+        <p>Please reload the extension (chrome://extensions → Reload) and refresh the TikTok page.</p>
       </div>
     `;
   }
-  popupRetryCount = 0;
 }
 
 /**
@@ -318,35 +236,9 @@ function showError(message) {
         <div class="no-videos-icon">⚠️</div>
         <h3>Error</h3>
         <p>${message}</p>
-        <button class="refresh-btn" onclick="window.loadVideoData(true, true)">🔄 Retry</button>
       </div>
     `;
   }
-}
-
-/**
- * Set up periodic refresh for lazy loading
- */
-function setupPeriodicRefresh() {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-  }
-
-  refreshInterval = setInterval(() => {
-    const container = document.getElementById("videoList");
-    if (!container) return;
-
-    // Only refresh if showing "no videos" or "loading" state
-    const hasNoVideos = container.querySelector(".no-videos");
-    if (
-      hasNoVideos &&
-      popupRetryCount < RETRY_CONFIG.MAX_RETRIES &&
-      !isLoading
-    ) {
-      // Silently refresh (don't show loading again)
-      loadVideoData(false, true);
-    }
-  }, RETRY_CONFIG.PERIODIC_REFRESH_INTERVAL);
 }
 
 /**
@@ -366,42 +258,23 @@ function setupNavigationDetection() {
 
         // If URL or video ID changed, reload data
         if (newUrl !== currentUrl || newVideoId !== currentVideoId) {
-          console.log("Navigation detected in popup:", {
-            oldUrl: currentUrl,
-            newUrl: newUrl,
-            oldVideoId: currentVideoId,
-            newVideoId: newVideoId,
-          });
-          // Reset and reload
-          popupRetryCount = 0;
           loadVideoData(true, true);
         }
       }
     });
-  }, RETRY_CONFIG.NAVIGATION_CHECK_INTERVAL);
+  }, NAVIGATION_CHECK_INTERVAL_MS);
 }
 
 /**
  * Cleanup intervals and release large refs to avoid memory retention
  */
 function cleanup() {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-    refreshInterval = null;
-  }
   if (navigationCheckInterval) {
     clearInterval(navigationCheckInterval);
     navigationCheckInterval = null;
   }
-  if (popupRetryTimer) {
-    clearTimeout(popupRetryTimer);
-    popupRetryTimer = null;
-  }
   latestVideoData = null;
 }
-
-// Make loadVideoData available globally for refresh buttons
-window.loadVideoData = loadVideoData;
 
 // Rest of the file continues with displayVideos and other functions...
 // [Previous displayVideos function and all other functions remain the same]
@@ -533,11 +406,6 @@ function displayVideos(videoData) {
       // Check if we have any videos after deduplication
       // If all were filtered out, use the original sortedQualities as fallback
       if (deduplicatedQualities.length === 0) {
-        console.warn(
-          "No videos after deduplication for videoKey:",
-          videoKey,
-          "- using original videoGroup as fallback",
-        );
         if (videoGroup.length === 0) {
           return; // Skip this group if no videos at all
         }
@@ -549,10 +417,7 @@ function displayVideos(videoData) {
       const firstVideo = deduplicatedQualities[0];
 
       // Safety check: ensure firstVideo exists and is valid
-      if (!firstVideo) {
-        console.warn("firstVideo is undefined for videoKey:", videoKey);
-        return; // Skip this group if firstVideo is invalid
-      }
+      if (!firstVideo) return;
 
       let displayTitle = null;
 
@@ -784,7 +649,6 @@ function parseConfigFile(configUrl) {
     },
     (response) => {
       if (response && response.success) {
-        console.log("Config parsed, reloading video list...");
         setTimeout(() => {
           loadVideoData(true, true);
         }, 1000);
@@ -894,7 +758,6 @@ function downloadVideo(
     },
     (downloadResponse) => {
       if (downloadResponse && downloadResponse.success) {
-        console.log("Download started");
       } else if (downloadResponse && downloadResponse.error) {
         // Show user-friendly error message in popup
         const errorMsg = downloadResponse.error;
@@ -915,10 +778,7 @@ function downloadVideo(
 // Show notification in popup (replaces alert)
 function showNotification(title, message, type = "info") {
   const notificationArea = document.getElementById("notificationArea");
-  if (!notificationArea) {
-    console.error("Notification area not found");
-    return;
-  }
+  if (!notificationArea) return;
 
   // Clear any existing notification
   notificationArea.innerHTML = "";
@@ -965,10 +825,6 @@ function getExtension(url) {
 function copyToClipboard(text) {
   navigator.clipboard
     .writeText(text)
-    .then(() => {
-      console.log("Copied to clipboard");
-    })
-    .catch((err) => {
-      console.error("Failed to copy:", err);
-    });
+    .then(() => {})
+    .catch(() => {});
 }

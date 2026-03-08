@@ -13,33 +13,22 @@
  */
 function safeStorageGet(keys, callback) {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-    console.warn('Chrome storage API not available');
     if (callback) callback({});
     return;
   }
-  
-  // Check if extension context is still valid
   if (!isExtensionContextValid()) {
-    console.warn('Extension context invalidated, cannot access storage');
     if (callback) callback({});
     return;
   }
-  
   try {
     chrome.storage.local.get(keys, (result) => {
       if (chrome.runtime.lastError) {
-        const errorMessage = chrome.runtime.lastError.message || '';
-        console.warn('Storage get error:', errorMessage);
         if (callback) callback({});
         return;
       }
-      
-      if (callback) {
-        callback(result || {});
-      }
+      if (callback) callback(result || {});
     });
   } catch (e) {
-    console.error('Error in safeStorageGet:', e);
     if (callback) callback({});
   }
 }
@@ -54,30 +43,20 @@ function safeStorageGet(keys, callback) {
  */
 function safeStorageSet(items, callback) {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-    console.warn('Chrome storage API not available');
     if (callback) callback();
     return Promise.resolve();
   }
-  
-  // Check if extension context is still valid
   if (!isExtensionContextValid()) {
-    console.warn('Extension context invalidated, cannot access storage');
     if (callback) callback();
     return Promise.resolve();
   }
-  
   return new Promise((resolve) => {
     try {
       chrome.storage.local.set(items, () => {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message || '';
-          console.warn('Storage set error:', errorMessage);
-        }
         if (callback) callback();
         resolve();
       });
     } catch (e) {
-      console.error('Error in safeStorageSet:', e);
       if (callback) callback();
       resolve();
     }
@@ -93,27 +72,18 @@ function safeStorageSet(items, callback) {
  */
 function safeStorageRemove(keys, callback) {
   if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-    console.warn('Chrome storage API not available');
     if (callback) callback();
     return;
   }
-  
   if (!isExtensionContextValid()) {
-    console.warn('Extension context invalidated, cannot access storage');
     if (callback) callback();
     return;
   }
-  
   try {
     chrome.storage.local.remove(keys, () => {
-      if (chrome.runtime.lastError) {
-        const errorMessage = chrome.runtime.lastError.message || '';
-        console.warn('Storage remove error:', errorMessage);
-      }
       if (callback) callback();
     });
   } catch (e) {
-    console.error('Error in safeStorageRemove:', e);
     if (callback) callback();
   }
 }
