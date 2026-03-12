@@ -1,84 +1,13 @@
 /**
- * Runs in page (main world). Intercepts only:
- * - URLs containing "item_list" (API JSON responses)
- * - TikTok page URLs (www.tiktok.com/, /foryou, /@user/video/id) whose response is HTML with hydration JSON.
- * Extracts video items and posts TIKTOK_ITEM_LIST to the content script.
+ * Runs in page (main world). Hooks fetch to detect TikTok item_list API responses,
+ * extracts video URL from item.video.PlayAddrStruct.UrlList and title from item.desc,
+ * then posts TIKTOK_ITEM_LIST to the content script.
  */
 (function () {
   "use strict";
   if (window.__tiktokItemListInterceptInstalled) return;
   window.__tiktokItemListInterceptInstalled = true;
   function logItemList() {}
-
-  function isItemListUrl(url) {
-    return typeof url === "string" && url.indexOf("item_list") !== -1;
-  }
-
-  function isTikTokPageUrl(url) {
-    if (typeof url !== "string" || !url) return false;
-    try {
-      var u = new URL(url, location.origin);
-      if (u.hostname !== "www.tiktok.com") return false;
-      var p = u.pathname || "";
-      return (
-        p === "/" ||
-        p === "" ||
-        p === "/foryou" ||
-        /^\/@[^/]+\/video\/\d+(\/)?$/.test(p)
-      );
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function shouldIntercept(url) {
-    return isItemListUrl(url) || isTikTokPageUrl(url);
-  }
-
-  /** Extract hydration JSON from TikTok HTML page response. */
-  function extractHydrationFromHtml(html) {
-    if (typeof html !== "string" || html.length < 100) return null;
-    var match = html.match(
-      /<script[^>]*id=["']__UNIVERSAL_DATA_FOR_REHYDRATION__["'][^>]*>([\s\S]*?)<\/script>/i
-    );
-    if (match) {
-      try {
-        return JSON.parse(match[1].trim());
-      } catch (e) {}
-    }
-    match = html.match(
-      /<script[^>]*id=["'][^"']*[Rr][Ee][Hh][Yy][Dd][Rr][Aa][Tt][Ii][Oo][Nn][^"']*["'][^>]*>([\s\S]*?)<\/script>/i
-    );
-    if (match) {
-      try {
-        return JSON.parse(match[1].trim());
-      } catch (e) {}
-    }
-    var idx = html.indexOf("__DEFAULT_SCOPE__");
-    if (idx !== -1) {
-      var start = html.lastIndexOf("{", idx);
-      if (start !== -1) {
-        var depth = 0;
-        var end = -1;
-        for (var i = start; i < html.length; i++) {
-          if (html[i] === "{") depth++;
-          else if (html[i] === "}") {
-            depth--;
-            if (depth === 0) {
-              end = i + 1;
-              break;
-            }
-          }
-        }
-        if (end > start) {
-          try {
-            return JSON.parse(html.slice(start, end));
-          } catch (e) {}
-        }
-      }
-    }
-    return null;
-  }
 
   function getVideoUrl(item) {
     const playAddr = item.video && item.video.PlayAddrStruct;
@@ -143,16 +72,7 @@
       var e = itemToEntry(videoDetail.itemInfo.itemStruct);
       if (e) out.push(e);
     }
-    var listKeys = [
-      "ItemList",
-      "item_list",
-      "itemList",
-      "recommendList",
-      "videoList",
-      "list",
-      "items",
-      "feed",
-    ];
+    var listKeys = ["ItemList", "item_list", "itemList", "recommendList", "videoList", "list", "items", "feed"];
     for (var l = 0; l < listKeys.length; l++) {
       var arr = scope[listKeys[l]];
       if (Array.isArray(arr)) {
@@ -197,8 +117,7 @@
     if (seen.has(obj)) return null;
     seen.add(obj);
     if (Array.isArray(obj)) {
-      var hasVideo =
-        obj.length > 0 && obj[0] && obj[0].video && obj[0].video.PlayAddrStruct;
+      var hasVideo = obj.length > 0 && obj[0] && obj[0].video && obj[0].video.PlayAddrStruct;
       if (hasVideo) return obj;
       for (var i = 0; i < obj.length; i++) {
         var found = deepFindVideoList(obj[i], seen);
@@ -229,30 +148,13 @@
     }
     var hydrationItems = extractFromHydrationStyle(data);
     if (hydrationItems.length > 0) {
-      logItemList(
-        source,
-        "hydration-style",
-        "url=",
-        url,
-        "items=",
-        hydrationItems.length,
-      );
-      window.postMessage(
-        { type: "TIKTOK_ITEM_LIST", items: hydrationItems },
-        "*",
-      );
+      logItemList(source, "hydration-style", "url=", url, "items=", hydrationItems.length);
+      window.postMessage({ type: "TIKTOK_ITEM_LIST", items: hydrationItems }, "*");
       return;
     }
     var deepList = deepFindVideoList(data);
     if (Array.isArray(deepList) && deepList.length > 0) {
-      logItemList(
-        source,
-        "deep list detected",
-        "url=",
-        url,
-        "length=",
-        deepList.length,
-      );
+      logItemList(source, "deep list detected", "url=", url, "length=", deepList.length);
       handleItemList(deepList);
     }
   }
@@ -261,32 +163,14 @@
   window.fetch = function (...args) {
     var url = typeof args[0] === "string" ? args[0] : args[0] && args[0].url;
     return origFetch.apply(this, args).then(function (response) {
-      if (!url || !response.ok || !shouldIntercept(url)) return response;
-      var clone = response.clone();
-      if (isTikTokPageUrl(url)) {
-        clone
-          .text()
-          .then(function (html) {
-            var data = extractHydrationFromHtml(html);
-            if (data) {
-              var items = extractFromHydrationStyle(data);
-              if (items.length > 0) {
-                window.postMessage(
-                  { type: "TIKTOK_ITEM_LIST", items: items },
-                  "*",
-                );
-              }
-            }
-          })
-          .catch(function () {});
-      } else {
-        clone
-          .json()
-          .then(function (data) {
-            tryEmitFromData(data, url, "fetch");
-          })
-          .catch(function () {});
-      }
+      if (!url || !response.ok) return response;
+      response
+        .clone()
+        .json()
+        .then(function (data) {
+          tryEmitFromData(data, url, "fetch");
+        })
+        .catch(function () {});
       return response;
     });
   };
@@ -303,39 +187,11 @@
       var url = xhr._ttUrl;
       if (xhr.addEventListener) {
         xhr.addEventListener("load", function () {
-          if (!url || !shouldIntercept(url)) return;
-          if (isTikTokPageUrl(url)) {
-            var text =
-              (xhr.responseType === "" || xhr.responseType === "text") &&
-              xhr.responseText
-                ? xhr.responseText
-                : "";
-            if (text.length >= 100) {
-              var data = extractHydrationFromHtml(text);
-              if (data) {
-                var items = extractFromHydrationStyle(data);
-                if (items.length > 0) {
-                  window.postMessage(
-                    { type: "TIKTOK_ITEM_LIST", items: items },
-                    "*",
-                  );
-                }
-              }
-            }
-            return;
-          }
+          if (!url) return;
           var data = null;
-          if (
-            xhr.responseType === "json" &&
-            xhr.response &&
-            typeof xhr.response === "object"
-          ) {
+          if (xhr.responseType === "json" && xhr.response && typeof xhr.response === "object") {
             data = xhr.response;
-          } else if (
-            (xhr.responseType === "" || xhr.responseType === "text") &&
-            xhr.responseText &&
-            xhr.responseText.length >= 50
-          ) {
+          } else if ((xhr.responseType === "" || xhr.responseType === "text") && xhr.responseText && xhr.responseText.length >= 50) {
             try {
               data = JSON.parse(xhr.responseText);
             } catch (e) {}
@@ -347,5 +203,5 @@
     };
   }
 
-  logItemList("item_list + page URL interceptor installed");
+  logItemList("item_list + hydration + xhr interceptor installed");
 })();

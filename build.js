@@ -31,6 +31,7 @@ const copyFiles = [
     src: "assets/feed-download-icon.png",
     dest: "assets/feed-download-icon.png",
   },
+  { src: "assets/images/download.svg", dest: "assets/images/download.svg" },
   { src: "js/tiktok-ffmpeg.js", dest: "js/tiktok-ffmpeg.js" },
   { src: "ffmpeg-runner.html", dest: "ffmpeg-runner.html" },
   { src: "ffmpeg-runner.js", dest: "ffmpeg-runner.js" },
@@ -194,6 +195,10 @@ async function build() {
       "downloadNotifications.js",
       "downloadButton.js",
       "content.js",
+      "visibleItemObserver.js",
+      "inject-item-list-early.js",
+      "item-list-intercept.js",
+      "fetch-video-in-page.js",
       "downloadButton.css",
       "downloadNotifications.css",
     ];

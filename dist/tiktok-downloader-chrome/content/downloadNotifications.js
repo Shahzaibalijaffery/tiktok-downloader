@@ -37,6 +37,15 @@ function createNotificationContainer() {
   return notificationContainer;
 }
 
+/**
+ * Show download notification
+ * @param {string} downloadId - Download ID
+ * @param {string} filename - Filename
+ * @param {string} status - Status message
+ * @param {number|undefined} progress - Progress percentage
+ * @param {string} qualityLabel - Quality label
+ * @param {Object} __dmDebugState - Debug state object
+ */
 function showDownloadNotification(
   downloadId,
   filename,
@@ -156,7 +165,8 @@ function showDownloadNotification(
 
 /**
  * Show in-page notification when download is blocked (max 2 downloads or large file >500 segments)
-
+ * @param {string} message - Message to show (e.g. "Maximum 2 downloads at a time...")
+ * @param {string} reason - 'maxConcurrent' | 'largeFile'
  */
 function showDownloadBlockedToast(message, reason = "maxConcurrent") {
   if (window.self !== window.top) return;
@@ -200,6 +210,13 @@ function showDownloadBlockedToast(message, reason = "maxConcurrent") {
   setTimeout(hide, 6000);
 }
 
+/**
+ * Update download notification
+ * @param {string} downloadId - Download ID
+ * @param {string} filename - Filename
+ * @param {string} status - Status message
+ * @param {number|undefined} progress - Progress percentage
+ */
 function updateDownloadNotification(downloadId, filename, status, progress) {
   if (window.self !== window.top) return;
   const container = createNotificationContainer();
@@ -305,6 +322,10 @@ function updateDownloadNotification(downloadId, filename, status, progress) {
   }
 }
 
+/**
+ * Hide download notification
+ * @param {string} downloadId - Download ID
+ */
 function hideDownloadNotification(downloadId) {
   const notificationEl = document.getElementById(
     `download-notification-${downloadId}`,
@@ -318,6 +339,11 @@ function hideDownloadNotification(downloadId) {
   }, 300);
 }
 
+/**
+ * Start polling for download progress
+ * @param {string} downloadId - Download ID
+ * @param {string} filename - Filename
+ */
 const MAX_CONCURRENT_POLLING_DOWNLOADS = 12;
 
 function startDownloadProgressPolling(downloadId, filename) {
@@ -556,6 +582,10 @@ function startDownloadProgressPolling(downloadId, filename) {
   });
 }
 
+/**
+ * Stop polling for download progress
+ * @param {string} downloadId - Download ID
+ */
 function stopDownloadProgressPolling(downloadId) {
   const download = activeDownloads.get(downloadId);
   if (download && download.interval) {
@@ -564,6 +594,10 @@ function stopDownloadProgressPolling(downloadId) {
   activeDownloads.delete(downloadId);
 }
 
+/**
+ * Get active downloads map (for external access)
+ * @returns {Map} Active downloads map
+ */
 function getActiveDownloads() {
   return activeDownloads;
 }

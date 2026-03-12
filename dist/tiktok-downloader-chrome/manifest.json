@@ -1,0 +1,80 @@
+{
+  "manifest_version": 3,
+  "name": "TikTok Video Downloader",
+  "version": "1.0.0",
+  "description": "Download TikTok videos in mp4 and other formats",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; frame-src https://helper.addoncrop.com"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "webRequest",
+    "storage",
+    "cookies",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.tiktok.com/*",
+    "*://v16-webapp-prime.tiktok.com/*",
+    "https://helper.addoncrop.com/*"
+  ],
+  "background": {
+    "service_worker": "background/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["content/inject-item-list-early.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "css": [
+        "content/downloadButton.css",
+        "content/downloadNotifications.css"
+      ],
+      "js": [
+        "scripts/utils.js",
+        "scripts/storage.js",
+        "scripts/messaging.js",
+        "content/utils.js",
+        "content/visibleItemObserver.js",
+        "content/downloadNotifications.js",
+        "content/downloadButton.js",
+        "content/content.js"
+      ],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/images/download.svg",
+        "assets/feed-download-icon.png",
+        "js/tiktok-ffmpeg.js",
+        "js/ffmpeg-helper-umd.cjs",
+        "js/ffmpeg-helper-umd.js",
+        "content/fetch-video-in-page.js",
+        "content/item-list-intercept.js"
+      ],
+      "matches": ["https://www.tiktok.com/*"]
+    }
+  ]
+}

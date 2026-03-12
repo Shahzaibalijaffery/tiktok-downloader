@@ -9,13 +9,6 @@
     var url = detail.url;
     var downloadId = detail.downloadId;
 
-    console.log(
-      "[TikTok DL Fetch] Fetching video from URL:",
-      url,
-      "with downloadId:",
-      downloadId,
-    );
-
     function fail(err) {
       window.postMessage(
         {
@@ -77,9 +70,7 @@
         function read() {
           return reader.read().then(function (result) {
             if (result.done) {
-              var len = chunks.reduce(function (s, c) {
-                return s + c.length;
-              }, 0);
+              var len = chunks.reduce(function (s, c) { return s + c.length; }, 0);
               var ab = new ArrayBuffer(len);
               var view = new Uint8Array(ab);
               var off = 0;

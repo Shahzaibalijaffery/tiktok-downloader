@@ -1,0 +1,223 @@
+/**
+ * Download notification styles (in-page toasts and progress cards).
+ * Loaded via manifest content_scripts on *://*.tiktok.com/*
+ */
+
+/* Container */
+#vimeo-downloader-notifications {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 999999;
+  width: 400px;
+  max-width: 400px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+
+@media (max-width: 600px) {
+  #vimeo-downloader-notifications {
+    width: calc(100vw - 40px) !important;
+    max-width: calc(100vw - 40px) !important;
+    left: 20px !important;
+    right: 20px !important;
+    bottom: 20px !important;
+  }
+
+  #vimeo-downloader-notifications > [id^="download-notification-"],
+  #vimeo-downloader-notifications > #download-blocked-toast {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    padding: 12px 16px !important;
+    font-size: 13px !important;
+  }
+}
+
+#vimeo-downloader-notifications::-webkit-scrollbar {
+  width: 6px;
+}
+#vimeo-downloader-notifications::-webkit-scrollbar-track {
+  background: transparent;
+}
+#vimeo-downloader-notifications::-webkit-scrollbar-thumb {
+  background: rgba(102, 126, 234, 0.5);
+  border-radius: 3px;
+}
+#vimeo-downloader-notifications::-webkit-scrollbar-thumb:hover {
+  background: rgba(102, 126, 234, 0.7);
+}
+
+/* Animations */
+@keyframes dm-notif-slideInUp {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes dm-notif-slideOutDown {
+  from {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+}
+
+/* Download notification card */
+.dm-notification-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px 20px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  width: 400px;
+  min-width: 400px;
+  max-width: 400px;
+  box-sizing: border-box;
+}
+
+.dm-notification-card.dm-notif-anim-in {
+  animation: dm-notif-slideInUp 0.3s ease-out;
+}
+
+.dm-notification-card.dm-notif-exit {
+  animation: dm-notif-slideOutDown 0.3s ease-out forwards;
+}
+
+/* Blocked / toast notification */
+.dm-notification-toast {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  padding: 16px 20px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  width: 400px;
+  max-width: calc(100vw - 40px);
+  box-sizing: border-box;
+}
+
+.dm-notification-toast.dm-notif-anim-in {
+  animation: dm-notif-slideInUp 0.3s ease-out;
+}
+
+.dm-notification-toast.dm-notif-anim-out {
+  animation: dm-notif-slideOutDown 0.3s ease-out forwards;
+}
+
+/* Header row (icon + title + filename) */
+.dm-notification-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.dm-notification-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.dm-notification-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dm-notification-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.dm-notification-filename {
+  font-size: 12px;
+  opacity: 0.9;
+  word-break: break-word;
+}
+
+.dm-notification-quality {
+  opacity: 0.9;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.dm-notification-status {
+  font-size: 13px;
+  opacity: 0.95;
+  margin-top: 8px;
+}
+
+/* Progress bar */
+.dm-notification-progress-wrap {
+  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.dm-notification-progress-fill {
+  background: white;
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 10px;
+}
+
+.dm-notification-progress-pct {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+/* Buttons */
+.dm-notification-btn {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dm-notification-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Toast content layout */
+.dm-notification-toast .dm-notification-header {
+  align-items: flex-start;
+}
+
+.dm-notification-toast .dm-notification-title {
+  margin-bottom: 6px;
+}
+
+.dm-notification-toast .dm-notification-status {
+  font-size: 13px;
+  opacity: 0.95;
+}

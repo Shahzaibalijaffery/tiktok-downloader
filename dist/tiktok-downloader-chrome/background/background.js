@@ -423,7 +423,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       ffmpegResponseTimeouts[opId] = null;
     }
     const tabId = request.targetTabId;
-    const runnerTabId = sender && sender.tab && sender.tab.id ? sender.tab.id : ffmpegRunnerTabId;
     if (tabId) {
       chrome.tabs.sendMessage(
         tabId,
@@ -439,15 +438,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         function () {
           if (chrome.runtime.lastError) {
           }
-          if (runnerTabId != null) {
-            ffmpegRunnerTabId = null;
-            chrome.tabs.remove(runnerTabId, function () {});
-          }
         },
       );
-    } else if (runnerTabId != null) {
-      ffmpegRunnerTabId = null;
-      chrome.tabs.remove(runnerTabId, function () {});
     }
     return false;
   } else if (request.action === "download") {

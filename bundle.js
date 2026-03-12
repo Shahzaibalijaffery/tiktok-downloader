@@ -19,6 +19,10 @@ const filesToInclude = [
   "content/downloadNotifications.js",
   "content/downloadButton.js",
   "content/content.js",
+  "content/visibleItemObserver.js",
+  "content/inject-item-list-early.js",
+  "content/item-list-intercept.js",
+  "content/fetch-video-in-page.js",
   "content/downloadButton.css",
   "content/downloadNotifications.css",
   "popup/popup.html",
@@ -31,6 +35,7 @@ const filesToInclude = [
   "icons/icon48.png",
   "icons/icon128.png",
   "assets/feed-download-icon.png",
+  "assets/images/download.svg",
 ];
 
 /**
